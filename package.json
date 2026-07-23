@@ -9,7 +9,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run test:logic && npm run build",
+    "test:logic": "node --experimental-strip-types --test tests/ranking.test.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

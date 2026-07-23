@@ -1,98 +1,74 @@
-# vinext-starter
+# 校内陸上大会 記録管理・順位集計
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+校内陸上大会向けの、競技一覧・記録入力・順位計算・チーム得点集計を一体化したWebアプリです。
 
-## Prerequisites
+## 画面
 
-- Node.js `>=22.13.0`
+- 競技一覧（開始時刻別）
+- 組別結果／全体順位／実力帯別順位
+- チーム総合得点と得点取引
+- スマートフォン記録入力
+- 大会管理（状態、選手、エントリー、記録訂正、監査ログ）
 
-## Quick Start
+## NANS風UI
+
+`Desktop/校内大会/sample集/sample` のモックHTMLをゴールデンマスターとして解析し、次の値とDOMパターンを直接再利用しています。
+
+- 青ヘッダー `#3d73cc`
+- 表ヘッダー `#244f96`
+- 淡青の交互行 `#e9f7fd`
+- 罫線 `#c9c9c9`
+- 選択中の緑 `#84bb44`
+- 下線付きの青リンク、灰色のDNS/DNF/DQ/NM行、密度の高い固定レイアウト表
+
+モックCSSからの意図的な差分は、スマートフォンで表を横幅いっぱいに収めるための
+`width: 100%; min-width: 0; table-layout: fixed;` です。モックに含まれていた
+`min-width: 760px` は390pxで横スクロールを起こすため採用していません。
+
+## 計算
+
+`lib/ranking.ts` に副作用のない関数として分離しています。
+
+- 記録文字列のサニタイズと正規化
+- トラック昇順／フィールド降順
+- 同順位（競技順位方式）
+- DNS、DNF、DQ、NMの順位除外
+- 全体順位と実力帯別順位
+- 種目順位点とPBボーナス
+- チーム総合同点時の1位数・2位数比較
+
+表示文字列（`1:03.87`、`5m42`）と計算値（`63.87`、`5.42`）は分離しています。
+
+## データモデル
+
+`lib/domain.ts` で次のエンティティを分離しています。
+
+`athletes` / `teams` / `events` / `entries` / `heats` / `results` /
+`scoreRules` / `scoreTransactions` / `auditLogs`
+
+## 開発と確認
 
 ```bash
 npm install
 npm run dev
+npm run test:logic
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+`npm test` は計算ロジックのテスト後に本番ビルドを実行します。
 
-## Included Shape
+確認済みviewport:
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+- 390 × 844
+- 393 × 852
+- 430 × 932
+- 768 × 1024
+- 1440 × 900
 
-## Workspace Auth Headers
+確認画像は `screenshots/` に保存しています。
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+## 保存方式
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+端末内はIndexedDBへ保存し、オンライン時は `/api/state` へ同期します。現在のAPI保存先は
+サーバーランタイムのメモリであり、永続データベースではありません。大会本番で複数端末から
+永続利用する場合は、認証と永続DBへの置換が必要です。

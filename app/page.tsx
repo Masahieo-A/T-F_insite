@@ -1,217 +1,46 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import {
+  initialState,
+  type Entry,
+  type Event,
+  type EventStatus,
+  type MeetingState,
+  type Result,
+  type ResultStatus,
+} from "@/lib/domain";
+import {
+  calculateEventScoreTransactions,
+  calculateOverallStandings,
+  formatPerformance,
+  normalizePerformance,
+  rankResults,
+  rankResultsByAbilityBand,
+  sanitizeNumericInput,
+  type RankedResult,
+} from "@/lib/ranking";
 
-type Team = { id: string; name: string; short: string; color: string };
-type Athlete = {
-  id: string;
-  bib: number;
-  name: string;
-  kana: string;
-  grade: number;
-  sex: "男子" | "女子";
-  teamId: string;
-};
-type EventType = "track" | "field" | "highjump" | "relay" | "special";
-type EventStatus = "未編成" | "編成済み" | "入力中" | "速報" | "確定" | "訂正中";
-type EventItem = {
-  id: string;
-  time: string;
-  name: string;
-  category: "男子" | "女子" | "共通";
-  type: EventType;
-  round: string;
-  heat: string;
-  status: EventStatus;
-  slots: number;
-  progress: number;
-};
-type AttemptValue = number | "FOUL" | "PASS" | "MISS";
-type Mark = { value: number | null; code?: string; attempts?: AttemptValue[] };
-type AuditItem = { id: string; at: string; actor: string; action: string; detail: string };
-type AppState = {
-  teams: Team[];
-  athletes: Athlete[];
-  events: EventItem[];
-  results: Record<string, Record<string, Mark>>;
-  audit: AuditItem[];
-  updatedAt: string;
-};
+type View = "schedule" | "results" | "team" | "input" | "admin";
+type ResultMode = "heats" | "overall" | "band";
+type AdminMode = "status" | "athletes" | "entries" | "corrections" | "audit";
 
-const TEAMS: Team[] = [
-  { id: "a", name: "紅チーム", short: "紅", color: "#d84845" },
-  { id: "b", name: "蒼チーム", short: "蒼", color: "#2584c7" },
-  { id: "c", name: "翠チーム", short: "翠", color: "#2f9b67" },
-];
+const RESULT_CODES: ResultStatus[] = ["DNS", "DNF", "DQ", "NM"];
+const EVENT_STATUSES: EventStatus[] = ["編成済み", "入力中", "速報", "確定", "訂正中"];
 
-const NAMES = [
-  ["青木 陽斗", "アオキ ハルト"], ["石川 結衣", "イシカワ ユイ"], ["上田 蒼真", "ウエダ ソウマ"],
-  ["遠藤 美咲", "エンドウ ミサキ"], ["大西 蓮", "オオニシ レン"], ["加藤 凛", "カトウ リン"],
-  ["木村 悠真", "キムラ ユウマ"], ["小林 彩花", "コバヤシ アヤカ"], ["斎藤 湊", "サイトウ ミナト"],
-  ["佐々木 杏", "ササキ アン"], ["鈴木 大和", "スズキ ヤマト"], ["高橋 莉央", "タカハシ リオ"],
-  ["田中 颯太", "タナカ ソウタ"], ["中村 心春", "ナカムラ コハル"], ["西村 伊織", "ニシムラ イオリ"],
-  ["橋本 芽依", "ハシモト メイ"], ["林 陸", "ハヤシ リク"], ["藤田 葵", "フジタ アオイ"],
-  ["前田 琉生", "マエダ ルイ"], ["松本 咲良", "マツモト サクラ"], ["三浦 朝陽", "ミウラ アサヒ"],
-  ["宮本 澪", "ミヤモト ミオ"], ["村上 岳", "ムラカミ ガク"], ["森 七海", "モリ ナナミ"],
-  ["山口 樹", "ヤマグチ イツキ"], ["山田 紬", "ヤマダ ツムギ"], ["吉田 翔", "ヨシダ ショウ"],
-  ["渡辺 琴音", "ワタナベ コトネ"], ["井上 陽向", "イノウエ ヒナタ"], ["岡田 凪", "オカダ ナギ"],
-  ["川口 新", "カワグチ アラタ"], ["近藤 花", "コンドウ ハナ"], ["坂本 奏太", "サカモト ソウタ"],
-  ["清水 ひかり", "シミズ ヒカリ"], ["原田 翼", "ハラダ ツバサ"], ["福田 結月", "フクダ ユヅキ"],
-];
-
-const ATHLETES: Athlete[] = NAMES.map(([name, kana], i) => ({
-  id: `p${i + 1}`,
-  bib: 101 + i,
-  name,
-  kana,
-  grade: (i % 3) + 1,
-  sex: i % 2 ? "女子" : "男子",
-  teamId: TEAMS[i % 3].id,
-}));
-
-const EVENTS: EventItem[] = [
-  { id: "e60m", time: "13:50", name: "60m", category: "共通", type: "track", round: "タイムレース決勝", heat: "3組", status: "確定", slots: 3, progress: 100 },
-  { id: "e250", time: "14:10", name: "250m（1周）", category: "共通", type: "track", round: "タイムレース決勝", heat: "3組", status: "確定", slots: 3, progress: 100 },
-  { id: "elong", time: "14:35", name: "走幅跳", category: "共通", type: "field", round: "決勝", heat: "1組", status: "速報", slots: 3, progress: 82 },
-  { id: "ehigh", time: "14:35", name: "走高跳", category: "共通", type: "highjump", round: "決勝", heat: "1組", status: "入力中", slots: 2, progress: 64 },
-  { id: "eshot", time: "14:35", name: "砲丸投", category: "共通", type: "field", round: "決勝", heat: "1組", status: "速報", slots: 3, progress: 76 },
-  { id: "e500", time: "15:45", name: "500m（2周）", category: "共通", type: "track", round: "タイムレース決勝", heat: "2組", status: "編成済み", slots: 2, progress: 0 },
-  { id: "e1000", time: "16:05", name: "1000m（4周）", category: "共通", type: "track", round: "決勝", heat: "1組", status: "編成済み", slots: 2, progress: 0 },
-  { id: "edeclare", time: "16:30", name: "申告タイム250m", category: "共通", type: "special", round: "特別競技", heat: "2組", status: "編成済み", slots: 2, progress: 0 },
-  { id: "erelay", time: "16:55", name: "4×250mリレー", category: "共通", type: "relay", round: "決勝", heat: "1組", status: "編成済み", slots: 1, progress: 0 },
-  { id: "eshuttle", time: "17:30", name: "12×50m全員シャトルR", category: "共通", type: "relay", round: "決勝", heat: "1組", status: "編成済み", slots: 1, progress: 0 },
-];
-
-const RESULT_SEEDS: Record<string, Record<string, Mark>> = {};
-for (const event of EVENTS) {
-  RESULT_SEEDS[event.id] = {};
-  ATHLETES.slice(0, event.slots * 3).forEach((athlete, i) => {
-    const base =
-      event.id === "e60m" ? 7460 :
-      event.id === "e250" ? 34280 :
-      event.id === "elong" ? 5800 :
-      event.id === "eshot" ? 11500 :
-      event.id === "ehigh" ? 1700 : 0;
-    RESULT_SEEDS[event.id][athlete.id] = event.type === "field"
-      ? { value: base - i * 90, attempts: [base - i * 120, "FOUL", base - i * 90] }
-      : { value: event.type === "track" ? base + i * 410 : base };
-  });
-}
-
-const INITIAL: AppState = {
-  teams: TEAMS,
-  athletes: ATHLETES,
-  events: EVENTS,
-  results: RESULT_SEEDS,
-  audit: [
-    { id: "a1", at: "14:42:18", actor: "走幅跳記録係", action: "速報提出", detail: "走幅跳 9名・第2試技まで" },
-    { id: "a2", at: "14:31:04", actor: "主任記録員", action: "結果確定", detail: "250m（1周） 全3組" },
-    { id: "a3", at: "14:08:26", actor: "管理者", action: "結果確定", detail: "60m 全3組" },
-  ],
-  updatedAt: "14:42:18",
-};
-
-const TYPE_LABEL: Record<EventType, string> = {
-  track: "トラック", field: "跳躍・投てき", highjump: "跳躍", relay: "リレー", special: "特別",
-};
-
-const statusOrder: Record<string, number> = { "": 0, NM: 1, DNF: 2, DNS: 3, DQ: 4 };
-const isTrack = (event: EventItem) => event.type === "track" || event.type === "relay" || event.type === "special";
-const formatTime = (ms: number | null) => {
-  if (ms == null) return "—";
-  if (ms >= 60000) {
-    const min = Math.floor(ms / 60000);
-    return `${min}:${((ms % 60000) / 1000).toFixed(2).padStart(5, "0")}`;
-  }
-  return (ms / 1000).toFixed(2);
-};
-const formatMark = (event: EventItem, mark?: Mark) => {
-  if (!mark) return "—";
-  if (mark.code) return mark.code;
-  if (mark.value == null) return "—";
-  return isTrack(event) ? formatTime(mark.value) : `${(mark.value / 1000).toFixed(2)}m`;
-};
-const parseDigits = (event: EventItem, raw: string) => {
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) return null;
-  const n = Number(digits);
-  if (event.type === "field" || event.type === "highjump") return n * 10;
-  if (event.name.startsWith("500") || event.name.startsWith("1000")) {
-    const cs = n % 100;
-    const totalSec = Math.floor(n / 100);
-    return (Math.floor(totalSec / 100) * 60 + (totalSec % 100)) * 1000 + cs * 10;
-  }
-  return n * 10;
-};
-
-function rankedEntries(state: AppState, event: EventItem) {
-  const marks = state.results[event.id] || {};
-  const entries = Object.entries(marks).map(([athleteId, mark]) => ({
-    athlete: state.athletes.find((a) => a.id === athleteId)!,
-    mark,
-  })).filter((x) => x.athlete);
-  entries.sort((a, b) => {
-    const ac = statusOrder[a.mark.code || ""] || 0;
-    const bc = statusOrder[b.mark.code || ""] || 0;
-    if (ac || bc) return ac - bc;
-    if (a.mark.value == null) return 1;
-    if (b.mark.value == null) return -1;
-    if (isTrack(event)) return a.mark.value - b.mark.value;
-    if (a.mark.value !== b.mark.value) return b.mark.value - a.mark.value;
-    const validA = (a.mark.attempts || []).filter((v): v is number => typeof v === "number").sort((x, y) => y - x);
-    const validB = (b.mark.attempts || []).filter((v): v is number => typeof v === "number").sort((x, y) => y - x);
-    for (let i = 1; i < Math.max(validA.length, validB.length); i++) {
-      if ((validA[i] || 0) !== (validB[i] || 0)) return (validB[i] || 0) - (validA[i] || 0);
-    }
-    if (event.type === "highjump") {
-      const missesA = (a.mark.attempts || []).filter((v) => v === "MISS").length;
-      const missesB = (b.mark.attempts || []).filter((v) => v === "MISS").length;
-      return missesA - missesB;
-    }
-    return 0;
-  });
-  let last = "";
-  let rank = 0;
-  return entries.map((entry, i) => {
-    const key = `${entry.mark.code || ""}-${entry.mark.value}`;
-    if (key !== last) rank = i + 1;
-    last = key;
-    return { ...entry, rank };
-  });
-}
-
-function eventTeamScores(state: AppState, event: EventItem) {
-  const ranks = rankedEntries(state, event);
-  const penalty = event.slots * state.teams.length + 1;
-  const relayPoints = event.id === "eshuttle" ? [12, 8, 4] : [10, 6, 4];
-  const points = event.type === "relay" ? relayPoints : [6, 4, 2];
-  return state.teams.map((team) => {
-    const own = ranks.filter((r) => r.athlete.teamId === team.id).slice(0, event.slots);
-    const values = own.map((r) => r.mark.code ? penalty : r.rank);
-    while (values.length < event.slots) values.push(penalty);
-    return { ...team, sum: values.reduce((a, b) => a + b, 0), values, points: 0, rank: 0 };
-  }).sort((a, b) => a.sum - b.sum || a.values.join(",").localeCompare(b.values.join(",")))
-    .map((team, i) => ({ ...team, points: points[i], rank: i + 1 }));
-}
-
-function teamScores(state: AppState) {
-  const scores = state.teams.map((team) => ({ ...team, points: 0, wins: 0, seconds: 0, events: 0 }));
-  state.events.filter((event) => ["速報", "確定"].includes(event.status) && event.type !== "special").forEach((event) => {
-    const teamRanks = eventTeamScores(state, event);
-    teamRanks.forEach((row, i) => {
-      const team = scores.find((s) => s.id === row.id)!;
-      team.points += row.points;
-      team.events++;
-      if (i === 0) team.wins++;
-      if (i === 1) team.seconds++;
-    });
-  });
-  return scores.sort((a, b) => b.points - a.points || b.wins - a.wins || b.seconds - a.seconds);
+function isMeetingState(value: unknown): value is MeetingState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Partial<MeetingState>;
+  return state.dataVersion === 2
+    && Array.isArray(state.athletes)
+    && Array.isArray(state.entries)
+    && Array.isArray(state.heats)
+    && Array.isArray(state.results);
 }
 
 async function openDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("nans-kounai", 1);
+    const request = indexedDB.open("nans-kounai-faithful", 1);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("cache")) db.createObjectStore("cache");
@@ -221,6 +50,7 @@ async function openDb() {
     request.onerror = () => reject(request.error);
   });
 }
+
 async function idbPut(store: string, key: IDBValidKey | undefined, value: unknown) {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
@@ -231,430 +61,598 @@ async function idbPut(store: string, key: IDBValidKey | undefined, value: unknow
   });
   db.close();
 }
-async function idbGetState(): Promise<AppState | null> {
+
+async function idbGetState(): Promise<MeetingState | null> {
   const db = await openDb();
   return new Promise((resolve) => {
-    const req = db.transaction("cache").objectStore("cache").get("state");
-    req.onsuccess = () => { db.close(); resolve((req.result as AppState) || null); };
-    req.onerror = () => { db.close(); resolve(null); };
+    const request = db.transaction("cache").objectStore("cache").get("state");
+    request.onsuccess = () => {
+      db.close();
+      resolve(isMeetingState(request.result) ? request.result : null);
+    };
+    request.onerror = () => {
+      db.close();
+      resolve(null);
+    };
   });
 }
 
+function eventDiscipline(event: Event) {
+  if (event.id === "shot") return "投てき";
+  if (["long", "high"].includes(event.id)) return "跳躍";
+  return "トラック";
+}
+
+function fullEventName(event: Event) {
+  return `${event.category}${event.name}`;
+}
+
+function getResult(state: MeetingState, entryId: string): Result | undefined {
+  return state.results.find((result) => result.entryId === entryId);
+}
+
+function getEntryRows(
+  state: MeetingState,
+  event: Event,
+  entryList: Entry[],
+  order: "lane" | "rank",
+): RankedResult[] {
+  const ranked = rankResults(state.results, entryList, state.athletes, event);
+  return order === "rank"
+    ? ranked
+    : [...ranked].sort((a, b) => a.entry.laneOrOrder - b.entry.laneOrOrder);
+}
+
+function displayResult(item: RankedResult, event: Event) {
+  return item.result.status === "OK"
+    ? formatPerformance(item.result.value, event)
+    : item.result.status;
+}
+
 export default function Home() {
-  const [state, setState] = useState<AppState>(INITIAL);
-  const [tab, setTab] = useState<"schedule" | "results" | "input" | "admin">("schedule");
+  const [state, setState] = useState<MeetingState>(initialState);
+  const [view, setView] = useState<View>("schedule");
   const [kindFilter, setKindFilter] = useState("全て");
   const [sexFilter, setSexFilter] = useState("全て");
-  const [selectedEventId, setSelectedEventId] = useState("elong");
-  const [selectedAthleteId, setSelectedAthleteId] = useState("p1");
-  const [draftValue, setDraftValue] = useState("");
-  const [attemptNo, setAttemptNo] = useState(1);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [sync, setSync] = useState<"同期済み" | "端末保存済み" | "同期中">("同期済み");
-  const [toast, setToast] = useState("");
-  const [adminSection, setAdminSection] = useState("進行");
+  const [selectedEventId, setSelectedEventId] = useState("60m");
+  const [selectedHeatId, setSelectedHeatId] = useState("60m-heat-1");
+  const [resultOrder, setResultOrder] = useState<"lane" | "rank">("rank");
+  const [resultMode, setResultMode] = useState<ResultMode>("heats");
+  const [abilityBand, setAbilityBand] = useState<"A" | "B" | "C">("A");
+  const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [inputCodes, setInputCodes] = useState<Record<string, ResultStatus>>({});
+  const [reviewing, setReviewing] = useState(false);
+  const [syncState, setSyncState] = useState<"同期済み" | "端末保存済み" | "同期中">("同期済み");
+  const [adminMode, setAdminMode] = useState<AdminMode>("status");
+  const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
+  const [adminCodes, setAdminCodes] = useState<Record<string, ResultStatus>>({});
+  const [adminReason, setAdminReason] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let active = true;
     (async () => {
-      const local = await idbGetState();
-      if (active && local) setState(local);
+      const cached = await idbGetState();
+      if (active && cached) setState(cached);
       try {
-        const res = await fetch("/api/state");
-        if (res.ok) {
-          const data = await res.json() as { state?: AppState | null };
-          if (active && data.state) {
-            setState(data.state);
-            await idbPut("cache", "state", data.state);
-          }
+        const response = await fetch("/api/state");
+        const data = await response.json() as { state?: unknown };
+        if (active && isMeetingState(data.state)) {
+          setState(data.state);
+          await idbPut("cache", "state", data.state);
         }
-      } catch { /* offline: cached state remains active */ }
+      } catch {
+        setSyncState("端末保存済み");
+      }
     })();
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
-    const online = () => setSync("同期済み");
-    const offline = () => setSync("端末保存済み");
-    window.addEventListener("online", online);
-    window.addEventListener("offline", offline);
-    return () => { active = false; window.removeEventListener("online", online); window.removeEventListener("offline", offline); };
+    return () => { active = false; };
   }, []);
 
-  const selectedEvent = state.events.find((e) => e.id === selectedEventId) || state.events[0];
-  const eventAthletes = state.athletes.slice(0, selectedEvent.slots * 3);
-  const selectedAthlete = eventAthletes.find((a) => a.id === selectedAthleteId) || eventAthletes[0];
-  const standings = useMemo(() => teamScores(state), [state]);
-  const currentEvent = state.events.find((e) => e.status === "入力中") || state.events[2];
-  const selectedRankings = useMemo(() => rankedEntries(state, selectedEvent), [state, selectedEvent]);
-  const selectedEventScores = useMemo(() => eventTeamScores(state, selectedEvent), [state, selectedEvent]);
-  const visibleEvents = state.events.filter((e) => {
-    const kindOk = kindFilter === "全て" || TYPE_LABEL[e.type].includes(kindFilter);
-    const sexOk = sexFilter === "全て" || e.category === sexFilter || e.category === "共通";
-    return kindOk && sexOk;
+  const selectedEvent = state.events.find((event) => event.id === selectedEventId) ?? state.events[0];
+  const selectedHeats = state.heats.filter((heat) => heat.eventId === selectedEvent.id);
+  const selectedHeat = selectedHeats.find((heat) => heat.id === selectedHeatId) ?? selectedHeats[0];
+  const heatEntries = state.entries.filter((entry) => entry.heatId === selectedHeat?.id);
+  const eventEntries = state.entries.filter((entry) => entry.eventId === selectedEvent.id);
+
+  const transactions = useMemo(() => state.events
+    .filter((event) => ["速報", "確定"].includes(event.status))
+    .flatMap((event) => calculateEventScoreTransactions(
+      event,
+      rankResults(state.results, state.entries, state.athletes, event),
+      state.teams,
+      state.scoreRules[0],
+    )), [state]);
+
+  const standings = useMemo(
+    () => calculateOverallStandings(state.teams, transactions),
+    [state.teams, transactions],
+  );
+
+  const visibleSchedule = state.heats.filter((heat) => {
+    const event = state.events.find((candidate) => candidate.id === heat.eventId)!;
+    const kindMatches = kindFilter === "全て" || eventDiscipline(event) === kindFilter;
+    const sexMatches = sexFilter === "全て" || event.category === sexFilter || event.category === "共通";
+    return kindMatches && sexMatches;
   });
 
-  const persist = async (next: AppState, action: string, detail: string) => {
+  const persist = async (next: MeetingState, action: string, detail: string) => {
     setState(next);
-    setSync("同期中");
+    setSyncState("同期中");
     await idbPut("cache", "state", next);
     try {
-      const res = await fetch("/api/state", {
+      const response = await fetch("/api/state", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ state: next, actor: "記録係端末", action, detail }),
+        body: JSON.stringify({ state: next, actor: "大会端末", action, detail }),
       });
-      if (!res.ok) throw new Error("sync failed");
-      setSync("同期済み");
+      if (!response.ok) throw new Error("sync failed");
+      setSyncState("同期済み");
     } catch {
       await idbPut("queue", undefined, { state: next, action, detail, createdAt: Date.now() });
-      setSync("端末保存済み");
+      setSyncState("端末保存済み");
     }
   };
 
-  const stageMark = (code?: string) => {
-    const value = code ? null : parseDigits(selectedEvent, draftValue);
-    const results = { ...state.results, [selectedEvent.id]: { ...(state.results[selectedEvent.id] || {}) } };
-    if (selectedEvent.type === "field" && code !== "NM") {
-      const previous = results[selectedEvent.id][selectedAthlete.id] || { value: null };
-      const attempts = [...(previous.attempts || [])];
-      attempts[attemptNo - 1] = code === "FOUL" ? "FOUL" : value!;
-      const valid = attempts.filter((attempt): attempt is number => typeof attempt === "number");
-      results[selectedEvent.id][selectedAthlete.id] = {
-        value: valid.length ? Math.max(...valid) : null,
-        attempts,
-        code: attempts.length >= 3 && !valid.length ? "NM" : undefined,
-      };
-      setAttemptNo(Math.min(3, attemptNo + 1));
+  const openEvent = (eventId: string, nextView: View = "results") => {
+    const heat = state.heats.find((candidate) => candidate.eventId === eventId);
+    setSelectedEventId(eventId);
+    if (heat) setSelectedHeatId(heat.id);
+    setResultMode("heats");
+    setReviewing(false);
+    setView(nextView);
+    window.scrollTo(0, 0);
+  };
+
+  const updateDraft = (entryId: string, raw: string, target: "input" | "admin") => {
+    const clean = sanitizeNumericInput(raw);
+    if (target === "input") {
+      setInputDrafts((current) => ({ ...current, [entryId]: clean }));
+      setInputCodes((current) => {
+        const next = { ...current };
+        delete next[entryId];
+        return next;
+      });
     } else {
-      results[selectedEvent.id][selectedAthlete.id] = { value, code };
+      setAdminDrafts((current) => ({ ...current, [entryId]: clean }));
+      setAdminCodes((current) => ({ ...current, [entryId]: "OK" }));
     }
-    setState({ ...state, results });
-    setDraftValue("");
-    setToast(`${selectedAthlete.name}の記録を仮保存しました`);
-    window.setTimeout(() => setToast(""), 2400);
   };
 
-  const stageHighJump = (result: "SUCCESS" | "MISS" | "PASS") => {
-    const results = { ...state.results, [selectedEvent.id]: { ...(state.results[selectedEvent.id] || {}) } };
-    const previous = results[selectedEvent.id][selectedAthlete.id] || { value: null };
-    const attempts: AttemptValue[] = [
-      ...(previous.attempts || []),
-      result === "MISS" ? "MISS" : result === "PASS" ? "PASS" : 1600,
-    ];
-    const misses = attempts.filter((v) => v === "MISS").length;
-    results[selectedEvent.id][selectedAthlete.id] = {
-      attempts,
-      value: result === "SUCCESS" ? Math.max(previous.value || 0, 1600) : previous.value,
-      code: misses >= 3 && !previous.value && result === "MISS" ? "NM" : undefined,
-    };
-    setState({ ...state, results });
-    setToast(`${selectedAthlete.name}：${result === "SUCCESS" ? "○ 成功" : result === "MISS" ? "× 失敗" : "－ パス"}`);
-    window.setTimeout(() => setToast(""), 2400);
-  };
-
-  const submitReview = async () => {
-    const time = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const next: AppState = {
+  const saveProvisional = async () => {
+    const nextResults = [...state.results];
+    heatEntries.forEach((entry) => {
+      const existingIndex = nextResults.findIndex((result) => result.entryId === entry.id);
+      const code = inputCodes[entry.id];
+      const raw = inputDrafts[entry.id];
+      if (!code && !raw) return;
+      const value = code ? null : normalizePerformance(raw, selectedEvent);
+      const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
+      const pb = athlete.personalBests[selectedEvent.id] ?? null;
+      const result: Result = {
+        id: existingIndex >= 0 ? nextResults[existingIndex].id : `result-${entry.id}`,
+        entryId: entry.id,
+        value,
+        displayValue: formatPerformance(value, selectedEvent),
+        status: code ?? "OK",
+        provisional: true,
+        isPersonalBest: value !== null && pb !== null && (selectedEvent.direction === "asc" ? value < pb : value > pb),
+      };
+      if (existingIndex >= 0) nextResults[existingIndex] = result;
+      else nextResults.push(result);
+    });
+    const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const next: MeetingState = {
       ...state,
-      events: state.events.map((e) => e.id === selectedEvent.id ? { ...e, status: "速報", progress: 100 } : e),
-      updatedAt: time,
-      audit: [{ id: crypto.randomUUID(), at: time, actor: "記録係端末", action: "速報提出", detail: `${selectedEvent.name} ${eventAthletes.length}名` }, ...state.audit],
+      results: nextResults,
+      events: state.events.map((event) => event.id === selectedEvent.id ? { ...event, status: "速報" } : event),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "記録係端末",
+        action: "速報保存",
+        entity: `${selectedEvent.name} ${selectedHeat.number}組`,
+        before: "入力中",
+        after: "速報",
+        reason: "入力内容確認済み",
+      }, ...state.auditLogs],
+      updatedAt: now,
     };
-    await persist(next, "速報提出", `${selectedEvent.name} ${eventAthletes.length}名`);
-    setReviewOpen(false);
-    setToast("速報へ反映しました");
+    await persist(next, "速報保存", `${selectedEvent.name} ${selectedHeat.number}組`);
+    setReviewing(false);
+    setMessage("速報を保存しました");
   };
 
-  const updateEventStatus = async (eventId: string, status: EventStatus) => {
-    const event = state.events.find((e) => e.id === eventId)!;
-    const time = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const next = {
+  const changeEventStatus = async (eventId: string, status: EventStatus) => {
+    const event = state.events.find((candidate) => candidate.id === eventId)!;
+    const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const next: MeetingState = {
       ...state,
-      updatedAt: time,
-      events: state.events.map((e) => e.id === eventId ? { ...e, status, progress: status === "確定" ? 100 : e.progress } : e),
-      audit: [{ id: crypto.randomUUID(), at: time, actor: "主任記録員", action: `状態変更：${status}`, detail: event.name }, ...state.audit],
+      events: state.events.map((candidate) => candidate.id === eventId ? { ...candidate, status } : candidate),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "状態変更",
+        entity: event.name,
+        before: event.status,
+        after: status,
+        reason: "管理画面操作",
+      }, ...state.auditLogs],
+      updatedAt: now,
     };
-    await persist(next, "状態変更", `${event.name} → ${status}`);
+    await persist(next, "状態変更", `${event.name}: ${event.status}→${status}`);
   };
 
-  const exportData = (format: "csv" | "json") => {
-    const body = format === "json"
-      ? JSON.stringify(state, null, 2)
-      : ["種目,順位,No,競技者名,チーム,記録", ...state.events.flatMap((event) =>
-          rankedEntries(state, event).map((r) => `${event.name},${r.rank},${r.athlete.bib},${r.athlete.name},${state.teams.find((t) => t.id === r.athlete.teamId)?.name},${formatMark(event, r.mark)}`)
-        )].join("\n");
-    const blob = new Blob(["\uFEFF", body], { type: format === "json" ? "application/json" : "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `校内大会_全結果.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const saveCorrections = async () => {
+    if (!adminReason.trim()) return;
+    const nextResults = [...state.results];
+    const changes: string[] = [];
+    eventEntries.forEach((entry) => {
+      const raw = adminDrafts[entry.id];
+      const code = adminCodes[entry.id];
+      if (!raw && !code) return;
+      const index = nextResults.findIndex((result) => result.entryId === entry.id);
+      const before = index >= 0 ? nextResults[index] : undefined;
+      const value = code && code !== "OK" ? null : normalizePerformance(raw || "", selectedEvent);
+      const nextResult: Result = {
+        id: before?.id ?? `result-${entry.id}`,
+        entryId: entry.id,
+        value,
+        displayValue: formatPerformance(value, selectedEvent),
+        status: code ?? "OK",
+        provisional: true,
+        isPersonalBest: before?.isPersonalBest ?? false,
+      };
+      if (index >= 0) nextResults[index] = nextResult;
+      else nextResults.push(nextResult);
+      changes.push(`${entry.id}:${before?.displayValue || before?.status || "未入力"}→${nextResult.displayValue || nextResult.status}`);
+    });
+    if (!changes.length) return;
+    const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const next: MeetingState = {
+      ...state,
+      results: nextResults,
+      events: state.events.map((event) => event.id === selectedEvent.id ? { ...event, status: "訂正中" } : event),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "記録訂正",
+        entity: selectedEvent.name,
+        before: changes.map((change) => change.split("→")[0]).join("、"),
+        after: changes.map((change) => change.split("→")[1]).join("、"),
+        reason: adminReason,
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "記録訂正", `${selectedEvent.name}: ${adminReason}`);
+    setAdminDrafts({});
+    setAdminCodes({});
+    setAdminReason("");
+    setMessage("訂正を保存し、状態を「訂正中」にしました");
   };
 
-  const importAthletes = (ev: ChangeEvent<HTMLInputElement>) => {
-    const file = ev.target.files?.[0];
+  const importAthletes = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const rows = String(reader.result).split(/\r?\n/).slice(1).filter(Boolean);
       if (!rows.length) return;
-      const athletes = rows.map((row, i) => {
-        const [bib, name, kana, grade, sex, team] = row.split(",");
-        return { id: `import-${i}`, bib: Number(bib), name, kana, grade: Number(grade), sex: sex as "男子" | "女子", teamId: team };
-      });
-      setState({ ...state, athletes });
-      setToast(`${athletes.length}名を取り込みました`);
+      setMessage(`CSV ${rows.length}件を確認しました。既存選手マスタは管理画面でのみ更新されます。`);
     };
     reader.readAsText(file);
   };
 
+  const headerTitle = view === "schedule"
+    ? "競技一覧－開始時刻別"
+    : view === "results"
+      ? "結果一覧（2026/07/23）"
+      : view === "team"
+        ? "対抗戦集計（2026/07/23）"
+        : view === "input"
+          ? "記録入力（2026/07/23）"
+          : "大会管理（2026/07/23）";
+
+  const renderResultRow = (item: RankedResult, event: Event, showRank = false) => {
+    const team = state.teams.find((candidate) => candidate.id === item.athlete.teamId)!;
+    const invalid = item.result.status !== "OK";
+    return (
+      <tr key={item.entry.id} className={invalid ? "dns" : ""}>
+        <td>{showRank ? item.rank ?? "-" : item.entry.laneOrOrder}</td>
+        <td>{item.athlete.bib}</td>
+        <td className="athlete">
+          <div className="kana">{item.athlete.kana}</div>
+          {item.athlete.name}（{item.athlete.grade}）
+        </td>
+        <td className="affiliation">{team.name}<br />{item.athlete.region}</td>
+        <td className="scorecol">
+          {displayResult(item, event)}
+          {item.result.isPersonalBest && item.result.status === "OK" && <span className="pb"> PB</span>}
+        </td>
+      </tr>
+    );
+  };
+
   return (
-    <main>
-      <header className="site-header">
-        <div className="header-inner">
-          <button className="brand" onClick={() => setTab("schedule")} aria-label="トップへ">
-            <span className="brand-mark">N</span>
-            <span><b>NANS KOUNAI</b><small>ATHLETICS LIVE</small></span>
-          </button>
-          <div className="header-meta">
-            <span className="live-dot" /> LIVE
-            <button className="top-button" onClick={() => setTab("schedule")}>TOP</button>
+    <div className="app">
+      <header className="topbar">
+        <h1>{headerTitle}</h1>
+        {view === "schedule" ? (
+          <div className="top-actions">
+            <button className="goldbtn" onClick={() => setKindFilter("全て")}>競技別表示</button>
+            <button className="goldbtn" onClick={() => setView("team")}>所属別表示</button>
           </div>
-        </div>
+        ) : (
+          <button className="topbtn" onClick={() => { setView("schedule"); window.scrollTo(0, 0); }}>
+            <span className="homeicon">⌂</span> TOP
+          </button>
+        )}
       </header>
 
-      <section className="meeting-band">
-        <div>
-          <p className="eyebrow">3年生引退試合</p>
-          <h1>校内陸上競技大会</h1>
-          <p>2026年7月23日（木・祝）　校内グラウンド・約250mトラック</p>
-        </div>
-        <div className="powered">Powered by <b>NANS KOUNAI</b></div>
-      </section>
-
-      <nav className="primary-tabs" aria-label="メインメニュー">
-        {([
-          ["schedule", "競技一覧"], ["results", "結果・速報"], ["input", "記録入力"], ["admin", "管理"],
-        ] as const).map(([key, label]) => (
-          <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
-        ))}
-      </nav>
-
-      <section className="live-summary">
-        <article className="now-card">
-          <div className="section-kicker"><span className="pulse" /> 現在競技</div>
-          <div className="now-main">
-            <div>
-              <h2>{currentEvent.name}</h2>
-              <p>{currentEvent.category}・{currentEvent.round}　<span className="status status-input">入力中</span></p>
-            </div>
-            <b className="progress-number">{currentEvent.progress}%</b>
+      {view === "schedule" && (
+        <section>
+          <div className="meet">
+            校内陸上競技大会　兼　3年生引退試合　2026/07/23
+            <br />
+            <div className="powered">Powered By School T&amp;F</div>
           </div>
-          <div className="progress"><i style={{ width: `${currentEvent.progress}%` }} /></div>
-          <div className="now-foot"><span>開始 {currentEvent.time}</span><span>最終更新 {state.updatedAt}</span></div>
-        </article>
-        <article className="standing-card">
-          <div className="section-kicker">チーム総合順位 <span className="provisional">暫定</span></div>
-          <ol>
-            {standings.map((team, i) => (
-              <li key={team.id}>
-                <span className={`medal medal-${i + 1}`}>{i + 1}</span>
-                <span className="team-line" style={{ "--team": team.color } as React.CSSProperties}>{team.name}</span>
-                <strong>{team.points}<small>点</small></strong>
-              </li>
-            ))}
-          </ol>
-        </article>
-        <article className="ceremony-card">
-          <div className="section-kicker">大会進行</div>
-          <div className="ceremony-time">18:25</div>
-          <h3>表彰・引退セレモニー</h3>
-          <p>競技終了予定 17:50</p>
-          <div className="timeline-mini"><i /><i /><i className="future" /><i className="future" /></div>
-          <span>全体進行 48%</span>
-        </article>
-      </section>
-
-      {tab === "schedule" && (
-        <section className="content-panel">
-          <div className="content-title">
-            <div><p className="eyebrow blue">PROGRAM</p><h2>競技一覧－開始時刻別</h2></div>
-            <div className="updated"><span>●</span> 自動更新　{state.updatedAt}</div>
-          </div>
-          <div className="filter-row">
-            <div className="segmented">
-              {["全て", "トラック", "跳躍", "投てき"].map((v) => <button key={v} className={kindFilter === v ? "on" : ""} onClick={() => setKindFilter(v)}>{v}</button>)}
-            </div>
-            <div className="segmented">
-              {["全て", "男子", "女子", "共通"].map((v) => <button key={v} className={sexFilter === v ? "on" : ""} onClick={() => setSexFilter(v)}>{v}</button>)}
-            </div>
-            <button className="dark-button" onClick={() => setTab("results")}>総合得点・得点内訳</button>
-          </div>
-          <div className="table-wrap">
-            <table className="nans-table schedule-table">
-              <thead><tr><th>開始</th><th>競技</th><th>区分</th><th>ラウンド</th><th>組</th><th>状態</th></tr></thead>
-              <tbody>
-                {visibleEvents.map((event) => (
-                  <tr key={event.id}>
-                    <td className="time-cell">{event.time}</td>
-                    <td><button className="event-link" onClick={() => { setSelectedEventId(event.id); setTab("results"); }}>{event.name}</button></td>
-                    <td>{event.category}</td><td>{event.round}</td><td>{event.heat}</td>
-                    <td><span className={`status status-${event.status}`}>{event.status}</span></td>
-                  </tr>
+          <div className="controls">
+            <div className="row">
+              <select className="select" aria-label="開催日"><option>2026/07/23</option></select>
+              <div className="seg discipline-seg">
+                {["全て", "トラック", "跳躍", "投てき"].map((value) => (
+                  <button key={value} className={kindFilter === value ? "active" : ""} onClick={() => setKindFilter(value)}>{value}</button>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </div>
+            <div className="row center">
+              <div className="seg">
+                {["全て", "男子", "女子"].map((value) => (
+                  <button key={value} className={sexFilter === value ? "active" : ""} onClick={() => setSexFilter(value)}>{value}</button>
+                ))}
+              </div>
+            </div>
+            <div className="darktabs">
+              <button onClick={() => openEvent("60m")}>タイムレース集計</button>
+              <button className="muted" disabled>混成集計</button>
+              <button onClick={() => setView("team")}>対抗戦集計</button>
+              <button>コンディション</button>
+            </div>
           </div>
-          <div className="legend-row"><span><i className="legend live" />競技中</span><span><i className="legend final" />確定</span><span><i className="legend soon" />開始前</span></div>
-        </section>
-      )}
-
-      {tab === "results" && (
-        <section className="content-panel">
-          <div className="content-title result-title">
-            <div><p className="eyebrow blue">RESULTS</p><h2>競技結果・速報</h2></div>
-            <select aria-label="表示する種目" value={selectedEvent.id} onChange={(e) => setSelectedEventId(e.target.value)}>
-              {state.events.map((event) => <option key={event.id} value={event.id}>{event.time}　{event.name}</option>)}
-            </select>
-          </div>
-          <div className="result-heading">
-            <div><span className={`status status-${selectedEvent.status}`}>{selectedEvent.status}</span><h3>{selectedEvent.category} {selectedEvent.name}</h3><p>{selectedEvent.round}・{selectedEvent.heat}</p></div>
-            <div className="lane-toggle"><button className="on">順位順</button><button>レーン順</button></div>
-          </div>
-          <div className="table-wrap">
-            <table className="nans-table result-table">
-              <thead><tr><th>順位</th><th>レーン</th><th>No.</th><th>競技者</th><th>チーム／学年</th><th>記録</th></tr></thead>
+          <div className="tablewrap schedule-wrap">
+            <table className="grid schedule-grid">
+              <thead>
+                <tr><th>開始時刻</th><th>競技名</th><th>ﾗｳﾝﾄﾞ</th><th>組</th><th>着取</th></tr>
+              </thead>
               <tbody>
-                {selectedRankings.map(({ athlete, mark, rank }, i) => {
-                  const team = state.teams.find((t) => t.id === athlete.teamId)!;
+                {visibleSchedule.length === 0 && <tr><td colSpan={5} className="empty">該当する競技はありません</td></tr>}
+                {visibleSchedule.map((heat) => {
+                  const event = state.events.find((candidate) => candidate.id === heat.eventId)!;
                   return (
-                    <tr key={athlete.id} className={mark.code ? "invalid-row" : ""}>
-                      <td className="rank-cell">{rank}</td><td>{(i % 6) + 1}</td><td>{athlete.bib}</td>
-                      <td className="athlete-cell"><small>{athlete.kana}</small><b>{athlete.name}</b></td>
-                      <td><span className="team-dot" style={{ background: team.color }} />{team.short}／{athlete.grade}年</td>
-                      <td className="record-cell">{formatMark(selectedEvent, mark)}{i === 0 && !mark.code && <small>PB</small>}</td>
+                    <tr key={heat.id}>
+                      <td>{event.startTime}</td>
+                      <td className="event">{fullEventName(event)}</td>
+                      <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{event.round}</a></td>
+                      <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{heat.number}</a></td>
+                      <td>-</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          <div className="score-explain">
-            <div>
-              <p className="eyebrow blue">SCORING BREAKDOWN</p><h3>この種目のチーム順位・獲得点</h3>
-              <p>各チーム上位{selectedEvent.slots}名の個人順位合計で比較します。</p>
-            </div>
-            <div className="score-grid">
-              {selectedEventScores.map((team) => <div key={team.id}><span>{team.rank}位・順位合計 {team.sum}</span><b style={{ color: team.color }}>{team.name}</b><strong>{team.points}点</strong></div>)}
-            </div>
+          <div className="staff-links">
+            <a href="#" onClick={(event) => { event.preventDefault(); openEvent("60m", "input"); }}>記録入力</a>
+            <a href="#" onClick={(event) => { event.preventDefault(); setView("admin"); }}>大会管理</a>
           </div>
-          <div className="codes">DNS：欠場　 DNF：途中棄権　 DQ：失格　 NM：記録なし　 PB：自己ベスト</div>
         </section>
       )}
 
-      {tab === "input" && (
-        <section className="input-shell">
-          <div className="input-topbar">
-            <div><p>記録入力ステーション</p><b>フィールドA・端末 03</b></div>
-            <div className={`sync sync-${sync}`}><i />{sync}</div>
+      {view === "results" && (
+        <section>
+          <div className="result-head">
+            <div className="event-title">{fullEventName(selectedEvent)}　{selectedEvent.round}</div>
+            <div className="subseg">
+              <button className={resultOrder === "lane" ? "active" : ""} onClick={() => setResultOrder("lane")}>レーン</button>
+              <button className={resultOrder === "rank" ? "active" : ""} onClick={() => setResultOrder("rank")}>順位</button>
+            </div>
+            <div className="history">
+              <button>歴代記録</button>
+              <a href="#" onClick={(event) => { event.preventDefault(); setResultMode(resultMode === "overall" ? "heats" : "overall"); }}>
+                {resultMode === "overall" ? "組別結果へ戻る" : "集計結果（集計済）"}
+              </a>
+              <a href="#" onClick={(event) => { event.preventDefault(); setResultMode("band"); }}>実力帯別</a>
+            </div>
+            {resultMode === "band" && (
+              <div className="subseg bandseg">
+                {(["A", "B", "C"] as const).map((band) => (
+                  <button key={band} className={abilityBand === band ? "active" : ""} onClick={() => setAbilityBand(band)}>{band}帯</button>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="input-grid">
-            <aside className="event-picker">
-              <h2>担当競技</h2>
-              {state.events.slice(0, 7).map((event) => (
-                <button key={event.id} className={selectedEvent.id === event.id ? "selected" : ""} onClick={() => {
-                  setSelectedEventId(event.id);
-                  setSelectedAthleteId(state.athletes[0].id);
-                }}>
-                  <span>{event.time}</span><b>{event.name}</b><small>{event.status}</small>
-                </button>
-              ))}
-            </aside>
-            <div className="entry-panel">
-              <div className="entry-head">
-                <div><p>{selectedEvent.category}・{selectedEvent.round}</p><h2>{selectedEvent.name}</h2></div>
-                <span>{eventAthletes.findIndex((a) => a.id === selectedAthlete.id) + 1} / {eventAthletes.length}名</span>
-              </div>
-              <div className="athlete-selector">
-                <button aria-label="前の選手" onClick={() => {
-                  const i = eventAthletes.findIndex((a) => a.id === selectedAthlete.id);
-                  setSelectedAthleteId(eventAthletes[(i - 1 + eventAthletes.length) % eventAthletes.length].id);
-                }}>‹</button>
-                <div><small>No. {selectedAthlete.bib}　{state.teams.find((t) => t.id === selectedAthlete.teamId)?.name}／{selectedAthlete.grade}年</small><b>{selectedAthlete.name}</b><span>{selectedAthlete.kana}</span></div>
-                <button aria-label="次の選手" onClick={() => {
-                  const i = eventAthletes.findIndex((a) => a.id === selectedAthlete.id);
-                  setSelectedAthleteId(eventAthletes[(i + 1) % eventAthletes.length].id);
-                }}>›</button>
-              </div>
-              {selectedEvent.type === "highjump" ? (
-                <div className="high-jump">
-                  <h3>現在の高さ　1.60m</h3>
-                  <div><button className="success" onClick={() => stageHighJump("SUCCESS")}>○<small>成功</small></button><button className="failure" onClick={() => stageHighJump("MISS")}>×<small>失敗</small></button><button className="pass" onClick={() => stageHighJump("PASS")}>－<small>パス</small></button></div>
-                  <p className="attempt-history">試技履歴　{(state.results[selectedEvent.id]?.[selectedAthlete.id]?.attempts || []).map((attempt) => attempt === "MISS" ? "×" : attempt === "PASS" ? "－" : "○").join("　") || "未入力"}</p>
+
+          {resultMode === "heats" && selectedHeats.map((heat) => {
+            const entries = state.entries.filter((entry) => entry.heatId === heat.id);
+            const rows = getEntryRows(state, selectedEvent, entries, resultOrder);
+            return (
+              <div key={heat.id} className="heat-block">
+                <div className="heat-title">{heat.number}組 {selectedEvent.status} 招集完了時刻 {heat.callCompleteAt}</div>
+                <div className="tablewrap">
+                  <table className="grid result-grid">
+                    <thead><tr><th>レーン</th><th>No</th><th>競技者名</th><th>所属<br />所属地</th><th>記録</th></tr></thead>
+                    <tbody>
+                      {rows.length === 0
+                        ? <tr><td colSpan={5} className="empty">結果はまだありません</td></tr>
+                        : rows.map((item) => renderResultRow(item, selectedEvent))}
+                    </tbody>
+                  </table>
                 </div>
-              ) : (
-                <>
-                  {selectedEvent.type === "field" && <div className="attempt-tabs">{[1, 2, 3].map((n) => <button key={n} className={attemptNo === n ? "active" : ""} onClick={() => setAttemptNo(n)}>第{n}試技<span>{formatMark(selectedEvent, { value: typeof state.results[selectedEvent.id]?.[selectedAthlete.id]?.attempts?.[n - 1] === "number" ? state.results[selectedEvent.id][selectedAthlete.id].attempts![n - 1] as number : null, code: state.results[selectedEvent.id]?.[selectedAthlete.id]?.attempts?.[n - 1] === "FOUL" ? "FOUL" : undefined })}</span></button>)}</div>}
-                  <label className="record-input">
-                    <span>{selectedEvent.type === "field" ? "記録（cm）" : "記録"}</span>
-                    <input inputMode="decimal" pattern="[0-9.]*" value={draftValue} onChange={(e) => setDraftValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder={selectedEvent.type === "field" ? "例：542 → 5.42m" : "例：1234 → 12.34"} />
-                    <b>{draftValue ? formatMark(selectedEvent, { value: parseDigits(selectedEvent, draftValue) }) : "—"}</b>
-                  </label>
-                  <div className="code-buttons">
-                    {(selectedEvent.type === "field" ? ["FOUL", "NM"] : ["DNS", "DNF", "DQ"]).map((code) => <button key={code} onClick={() => stageMark(code)}>{code}</button>)}
-                  </div>
-                  <button className="save-draft" disabled={!draftValue} onClick={() => stageMark()}>この記録を仮保存</button>
-                </>
-              )}
-              <div className="entry-progress">
-                {eventAthletes.map((athlete) => <button key={athlete.id} onClick={() => setSelectedAthleteId(athlete.id)} className={state.results[selectedEvent.id]?.[athlete.id] ? "done" : ""} aria-label={`${athlete.name}${state.results[selectedEvent.id]?.[athlete.id] ? "入力済み" : "未入力"}`} />)}
               </div>
-              <button className="review-button" onClick={() => setReviewOpen(true)}>全選手を確認して速報提出</button>
+            );
+          })}
+
+          {resultMode === "overall" && (
+            <div className="heat-block">
+              <div className="heat-title">全体順位 {selectedEvent.status}</div>
+              <div className="tablewrap">
+                <table className="grid result-grid">
+                  <thead><tr><th>順位</th><th>No</th><th>競技者名</th><th>所属<br />所属地</th><th>記録</th></tr></thead>
+                  <tbody>{rankResults(state.results, eventEntries, state.athletes, selectedEvent).map((item) => renderResultRow(item, selectedEvent, true))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {resultMode === "band" && (
+            <div className="heat-block">
+              <div className="heat-title">実力帯 {abilityBand}　全体順位</div>
+              <div className="tablewrap">
+                <table className="grid result-grid">
+                  <thead><tr><th>順位</th><th>No</th><th>競技者名</th><th>所属<br />所属地</th><th>記録</th></tr></thead>
+                  <tbody>
+                    {rankResultsByAbilityBand(rankResults(state.results, eventEntries, state.athletes, selectedEvent), abilityBand)
+                      .map((item) => renderResultRow(item, selectedEvent, true))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <div className="note">DNF:途中棄権、DNS:欠場、DQ:失格、NM:記録なし</div>
+        </section>
+      )}
+
+      {view === "team" && (
+        <section>
+          <div className="result-head">
+            <div className="event-title">チーム総合得点　<span className="provisional-text">暫定</span></div>
+            <div className="history"><a href="#" onClick={(event) => event.preventDefault()}>得点内訳（自動計算）</a></div>
+          </div>
+          <div className="heat-title">総合順位　最終更新 {state.updatedAt}</div>
+          <div className="tablewrap">
+            <table className="grid team-grid">
+              <thead><tr><th>順位</th><th>所属</th><th>得点</th><th>1位数</th><th>2位数</th></tr></thead>
+              <tbody>{standings.map((team) => <tr key={team.id}><td>{team.rank}</td><td className="event">{team.name}</td><td className="scorecol">{team.points}</td><td>{team.wins}</td><td>{team.seconds}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <div className="heat-title">種目別得点内訳</div>
+          <div className="tablewrap">
+            <table className="grid transaction-grid">
+              <thead><tr><th>競技</th><th>所属</th><th>内容</th><th>得点</th></tr></thead>
+              <tbody>{transactions.map((transaction) => {
+                const event = state.events.find((candidate) => candidate.id === transaction.eventId)!;
+                const team = state.teams.find((candidate) => candidate.id === transaction.teamId)!;
+                return <tr key={transaction.id}><td>{event.name}</td><td>{team.name}</td><td>{transaction.note}</td><td>{transaction.points}</td></tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {view === "input" && (
+        <section>
+          <div className="result-head">
+            <div className="event-title">スマートフォン記録入力　<span className="sync-label">{syncState}</span></div>
+            <div className="input-selects">
+              <select className="select" aria-label="入力種目" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "input")}>
+                {state.events.map((event) => <option key={event.id} value={event.id}>{fullEventName(event)}</option>)}
+              </select>
+              <select className="select" aria-label="入力組" value={selectedHeat.id} onChange={(event) => { setSelectedHeatId(event.target.value); setReviewing(false); }}>
+                {selectedHeats.map((heat) => <option key={heat.id} value={heat.id}>{heat.number}組</option>)}
+              </select>
             </div>
           </div>
-        </section>
-      )}
-
-      {tab === "admin" && (
-        <section className="admin-shell">
-          <aside className="admin-nav">
-            <p>大会管理</p>
-            {["進行", "選手・チーム", "種目・編成", "端末", "得点ルール", "監査ログ", "データ出力"].map((item) => <button key={item} className={adminSection === item ? "active" : ""} onClick={() => setAdminSection(item)}>{item}</button>)}
-            <div className="admin-user"><span>管</span><div><b>大会管理者</b><small>管理者権限</small></div></div>
-          </aside>
-          <div className="admin-content">
-            <div className="content-title"><div><p className="eyebrow blue">CONTROL CENTER</p><h2>{adminSection}</h2></div><span className="secure">● 管理者認証済み</span></div>
-            {adminSection === "進行" && (
-              <>
-                <div className="admin-cards"><div><span>完了競技</span><b>2<small> / 10</small></b></div><div><span>速報競技</span><b>2</b></div><div><span>未同期端末</span><b className="ok">0</b></div><div><span>要確認</span><b className="warn">1</b></div></div>
-                <div className="admin-box"><h3>競技進行ボード</h3>{state.events.map((event) => <div className="control-row" key={event.id}><time>{event.time}</time><b>{event.name}</b><span className={`status status-${event.status}`}>{event.status}</span><select aria-label={`${event.name}の状態`} value={event.status} onChange={(e) => updateEventStatus(event.id, e.target.value as EventStatus)}>{["未編成", "編成済み", "入力中", "速報", "確定", "訂正中"].map((s) => <option key={s}>{s}</option>)}</select></div>)}</div>
-              </>
-            )}
-            {adminSection === "選手・チーム" && (
-              <div className="admin-box">
-                <div className="box-title"><div><h3>選手名簿</h3><p>36名・3チーム（各12名）</p></div><label className="upload-button">CSVを取り込む<input type="file" accept=".csv" onChange={importAthletes} /></label></div>
-                <table className="nans-table"><thead><tr><th>No.</th><th>氏名</th><th>学年</th><th>区分</th><th>チーム</th></tr></thead><tbody>{state.athletes.slice(0, 12).map((a) => <tr key={a.id}><td>{a.bib}</td><td>{a.name}<small className="sub-kana">{a.kana}</small></td><td>{a.grade}年</td><td>{a.sex}</td><td>{state.teams.find((t) => t.id === a.teamId)?.name}</td></tr>)}</tbody></table>
+          <div className="heat-title">{selectedEvent.name} {selectedHeat.number}組　レーン・試順</div>
+          <div className="tablewrap">
+            <table className="grid input-grid">
+              <thead><tr><th>ﾚｰﾝ</th><th>No</th><th>競技者名</th><th>記録</th><th>状態</th></tr></thead>
+              <tbody>{heatEntries.sort((a, b) => a.laneOrOrder - b.laneOrOrder).map((entry) => {
+                const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
+                const existing = getResult(state, entry.id);
+                return (
+                  <tr key={entry.id} className={inputCodes[entry.id] ? "dns" : ""}>
+                    <td>{entry.laneOrOrder}</td><td>{athlete.bib}</td>
+                    <td className="athlete"><div className="kana">{athlete.kana}</div>{athlete.name}（{athlete.grade}）</td>
+                    <td>
+                      <input
+                        className="record-field"
+                        aria-label={`${athlete.name}の記録`}
+                        inputMode="decimal"
+                        pattern="[0-9.:]*"
+                        value={inputDrafts[entry.id] ?? ""}
+                        placeholder={existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : ""}
+                        onChange={(event) => updateDraft(entry.id, event.target.value, "input")}
+                      />
+                      <span className="unit">{selectedEvent.unit === "meters" ? "m" : "秒"}</span>
+                    </td>
+                    <td>
+                      <div className="code-row">
+                        {RESULT_CODES.map((code) => <button key={code} className={inputCodes[entry.id] === code ? "selected" : ""} onClick={() => setInputCodes((current) => ({ ...current, [entry.id]: code }))}>{code}</button>)}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+          <div className="input-actions">
+            <button className="darkbtn" onClick={() => setReviewing(true)}>入力内容を確認</button>
+          </div>
+          {reviewing && (
+            <div className="review-section">
+              <div className="heat-title">入力内容確認　{selectedHeat.number}組</div>
+              <div className="tablewrap">
+                <table className="grid review-grid">
+                  <thead><tr><th>ﾚｰﾝ</th><th>競技者名</th><th>保存内容</th></tr></thead>
+                  <tbody>{heatEntries.map((entry) => {
+                    const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
+                    const value = inputCodes[entry.id] || formatPerformance(normalizePerformance(inputDrafts[entry.id] || "", selectedEvent), selectedEvent) || "変更なし";
+                    return <tr key={entry.id}><td>{entry.laneOrOrder}</td><td>{athlete.name}</td><td>{value}</td></tr>;
+                  })}</tbody>
+                </table>
               </div>
-            )}
-            {adminSection === "監査ログ" && <div className="admin-box"><h3>記録修正・操作履歴</h3>{state.audit.map((a) => <div className="audit-row" key={a.id}><time>{a.at}</time><div><b>{a.action}</b><span>{a.detail}</span></div><small>{a.actor}</small></div>)}</div>}
-            {adminSection === "データ出力" && <div className="admin-box export-box"><h3>バックアップ・全結果出力</h3><p>確定済み・速報を含む大会データを出力します。</p><div><button onClick={() => exportData("csv")}>CSVをダウンロード</button><button onClick={() => exportData("json")}>JSONバックアップ</button></div></div>}
-            {!["進行", "選手・チーム", "監査ログ", "データ出力"].includes(adminSection) && <div className="admin-box placeholder-admin"><span>設定</span><h3>{adminSection}の設定</h3><p>大会単位の設定を安全に管理できます。変更内容はすべて監査ログへ記録されます。</p><button>設定を編集</button></div>}
-          </div>
+              <div className="input-actions"><button className="mutedbtn" onClick={() => setReviewing(false)}>入力へ戻る</button><button className="darkbtn" onClick={saveProvisional}>速報保存</button></div>
+            </div>
+          )}
         </section>
       )}
 
-      <footer><span>NANS KOUNAI ATHLETICS LIVE</span><span>最終更新 {state.updatedAt}　／　自動更新中</span></footer>
-
-      {reviewOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="review-title">
-          <div className="review-modal">
-            <div className="modal-head"><div><p className="eyebrow blue">FINAL CHECK</p><h2 id="review-title">速報提出前の確認</h2></div><button onClick={() => setReviewOpen(false)} aria-label="閉じる">×</button></div>
-            <p>{selectedEvent.name}・{eventAthletes.length}名の記録を確認してください。未入力は「—」で表示されています。</p>
-            <div className="review-list">{eventAthletes.map((a, i) => <div key={a.id}><span>{i + 1}</span><b>{a.name}</b><strong>{formatMark(selectedEvent, state.results[selectedEvent.id]?.[a.id])}</strong></div>)}</div>
-            <div className="modal-actions"><button onClick={() => setReviewOpen(false)}>入力へ戻る</button><button className="confirm" onClick={submitReview}>速報として保存</button></div>
+      {view === "admin" && (
+        <section>
+          <div className="result-head">
+            <div className="event-title">管理者画面</div>
+            <div className="subseg admin-seg">
+              {([
+                ["status", "状態管理"], ["athletes", "選手登録"], ["entries", "エントリー"], ["corrections", "記録修正"], ["audit", "監査ログ"],
+              ] as const).map(([key, label]) => <button key={key} className={adminMode === key ? "active" : ""} onClick={() => setAdminMode(key)}>{label}</button>)}
+            </div>
           </div>
-        </div>
+
+          {adminMode === "status" && <div className="tablewrap"><table className="grid admin-grid"><thead><tr><th>開始</th><th>競技名</th><th>状態</th><th>変更</th></tr></thead><tbody>{state.events.map((event) => <tr key={event.id}><td>{event.startTime}</td><td className="event">{event.name}</td><td>{event.status}</td><td><select className="compact-select" aria-label={`${event.name}の状態`} value={event.status} onChange={(change) => changeEventStatus(event.id, change.target.value as EventStatus)}>{EVENT_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></td></tr>)}</tbody></table></div>}
+
+          {adminMode === "athletes" && <>
+            <div className="admin-tools"><label className="goldbtn filebtn">選手CSV取込<input type="file" accept=".csv" onChange={importAthletes} /></label><span>登録済み {state.athletes.length}名</span></div>
+            <div className="tablewrap"><table className="grid athlete-master"><thead><tr><th>No</th><th>氏名</th><th>学年</th><th>性別</th><th>所属・登録先</th><th>実力帯</th></tr></thead><tbody>{state.athletes.map((athlete) => <tr key={athlete.id}><td>{athlete.bib}</td><td className="athlete"><div className="kana">{athlete.kana}</div>{athlete.name}</td><td>{athlete.grade}</td><td>{athlete.sex}</td><td>{state.teams.find((team) => team.id === athlete.teamId)?.name}<br />{athlete.affiliation}</td><td>{athlete.abilityBand}</td></tr>)}</tbody></table></div>
+          </>}
+
+          {adminMode === "entries" && <>
+            <div className="admin-tools"><select className="select" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "admin")}>{state.events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select><span>入力画面では選手マスタを変更できません</span></div>
+            <div className="tablewrap"><table className="grid entry-master"><thead><tr><th>組</th><th>ﾚｰﾝ</th><th>No</th><th>競技者名</th><th>得点対象</th></tr></thead><tbody>{eventEntries.map((entry) => { const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!; const heat = state.heats.find((candidate) => candidate.id === entry.heatId)!; return <tr key={entry.id}><td>{heat.number}</td><td>{entry.laneOrOrder}</td><td>{athlete.bib}</td><td className="event">{athlete.name}</td><td>{entry.scoringEligible ? "○" : "－"}</td></tr>; })}</tbody></table></div>
+          </>}
+
+          {adminMode === "corrections" && <>
+            <div className="admin-tools"><select className="select" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "admin")}>{state.events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select><input className="reason-field" value={adminReason} onChange={(event) => setAdminReason(event.target.value)} placeholder="訂正理由（必須）" /></div>
+            <div className="tablewrap"><table className="grid correction-grid"><thead><tr><th>No</th><th>競技者名</th><th>現在</th><th>訂正値</th><th>状態</th></tr></thead><tbody>{eventEntries.map((entry) => { const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!; const current = getResult(state, entry.id); return <tr key={entry.id}><td>{athlete.bib}</td><td className="event">{athlete.name}</td><td>{current?.status === "OK" ? formatPerformance(current.value, selectedEvent) : current?.status || "未入力"}</td><td><input className="record-field" inputMode="decimal" pattern="[0-9.:]*" value={adminDrafts[entry.id] || ""} onChange={(event) => updateDraft(entry.id, event.target.value, "admin")} /></td><td><select className="compact-select" value={adminCodes[entry.id] || "OK"} onChange={(event) => setAdminCodes((codes) => ({ ...codes, [entry.id]: event.target.value as ResultStatus }))}><option>OK</option>{RESULT_CODES.map((code) => <option key={code}>{code}</option>)}</select></td></tr>; })}</tbody></table></div>
+            <div className="input-actions"><button className="darkbtn" disabled={!adminReason.trim()} onClick={saveCorrections}>理由付きで訂正保存</button></div>
+          </>}
+
+          {adminMode === "audit" && <div className="tablewrap"><table className="grid audit-grid"><thead><tr><th>時刻</th><th>操作者</th><th>操作</th><th>対象</th><th>理由</th></tr></thead><tbody>{state.auditLogs.map((log) => <tr key={log.id}><td>{log.at}</td><td>{log.actor}</td><td>{log.action}</td><td>{log.entity}</td><td className="event">{log.reason}</td></tr>)}</tbody></table></div>}
+        </section>
       )}
-      {toast && <div className="toast" role="status">✓ {toast}</div>}
-    </main>
+
+      {message && <div className="message" role="status"><span>{message}</span><button onClick={() => setMessage("")}>閉じる</button></div>}
+    </div>
   );
 }
