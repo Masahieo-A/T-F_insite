@@ -26,7 +26,8 @@ type EventItem = {
   slots: number;
   progress: number;
 };
-type Mark = { value: number | null; code?: string; attempts?: (number | "FOUL")[] };
+type AttemptValue = number | "FOUL" | "PASS" | "MISS";
+type Mark = { value: number | null; code?: string; attempts?: AttemptValue[] };
 type AuditItem = { id: string; at: string; actor: string; action: string; detail: string };
 type AppState = {
   teams: Team[];
@@ -155,7 +156,19 @@ function rankedEntries(state: AppState, event: EventItem) {
     if (ac || bc) return ac - bc;
     if (a.mark.value == null) return 1;
     if (b.mark.value == null) return -1;
-    return isTrack(event) ? a.mark.value - b.mark.value : b.mark.value - a.mark.value;
+    if (isTrack(event)) return a.mark.value - b.mark.value;
+    if (a.mark.value !== b.mark.value) return b.mark.value - a.mark.value;
+    const validA = (a.mark.attempts || []).filter((v): v is number => typeof v === "number").sort((x, y) => y - x);
+    const validB = (b.mark.attempts || []).filter((v): v is number => typeof v === "number").sort((x, y) => y - x);
+    for (let i = 1; i < Math.max(validA.length, validB.length); i++) {
+      if ((validA[i] || 0) !== (validB[i] || 0)) return (validB[i] || 0) - (validA[i] || 0);
+    }
+    if (event.type === "highjump") {
+      const missesA = (a.mark.attempts || []).filter((v) => v === "MISS").length;
+      const missesB = (b.mark.attempts || []).filter((v) => v === "MISS").length;
+      return missesA - missesB;
+    }
+    return 0;
   });
   let last = "";
   let rank = 0;
@@ -167,22 +180,27 @@ function rankedEntries(state: AppState, event: EventItem) {
   });
 }
 
+function eventTeamScores(state: AppState, event: EventItem) {
+  const ranks = rankedEntries(state, event);
+  const penalty = event.slots * state.teams.length + 1;
+  const relayPoints = event.id === "eshuttle" ? [12, 8, 4] : [10, 6, 4];
+  const points = event.type === "relay" ? relayPoints : [6, 4, 2];
+  return state.teams.map((team) => {
+    const own = ranks.filter((r) => r.athlete.teamId === team.id).slice(0, event.slots);
+    const values = own.map((r) => r.mark.code ? penalty : r.rank);
+    while (values.length < event.slots) values.push(penalty);
+    return { ...team, sum: values.reduce((a, b) => a + b, 0), values, points: 0, rank: 0 };
+  }).sort((a, b) => a.sum - b.sum || a.values.join(",").localeCompare(b.values.join(",")))
+    .map((team, i) => ({ ...team, points: points[i], rank: i + 1 }));
+}
+
 function teamScores(state: AppState) {
   const scores = state.teams.map((team) => ({ ...team, points: 0, wins: 0, seconds: 0, events: 0 }));
   state.events.filter((event) => ["速報", "確定"].includes(event.status) && event.type !== "special").forEach((event) => {
-    const ranks = rankedEntries(state, event);
-    const teamRanks = state.teams.map((team) => {
-      const own = ranks.filter((r) => r.athlete.teamId === team.id).slice(0, event.slots);
-      const penalty = event.slots * state.teams.length + 1;
-      const values = own.map((r) => r.mark.code ? penalty : r.rank);
-      while (values.length < event.slots) values.push(penalty);
-      return { teamId: team.id, sum: values.reduce((a, b) => a + b, 0), values };
-    }).sort((a, b) => a.sum - b.sum || a.values.join(",").localeCompare(b.values.join(",")));
+    const teamRanks = eventTeamScores(state, event);
     teamRanks.forEach((row, i) => {
-      const team = scores.find((s) => s.id === row.teamId)!;
-      const relayPoints = event.id === "eshuttle" ? [12, 8, 4] : [10, 6, 4];
-      const points = event.type === "relay" ? relayPoints[i] : [6, 4, 2][i];
-      team.points += points;
+      const team = scores.find((s) => s.id === row.id)!;
+      team.points += row.points;
       team.events++;
       if (i === 0) team.wins++;
       if (i === 1) team.seconds++;
@@ -230,6 +248,7 @@ export default function Home() {
   const [selectedEventId, setSelectedEventId] = useState("elong");
   const [selectedAthleteId, setSelectedAthleteId] = useState("p1");
   const [draftValue, setDraftValue] = useState("");
+  const [attemptNo, setAttemptNo] = useState(1);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [sync, setSync] = useState<"同期済み" | "端末保存済み" | "同期中">("同期済み");
   const [toast, setToast] = useState("");
@@ -265,6 +284,7 @@ export default function Home() {
   const standings = useMemo(() => teamScores(state), [state]);
   const currentEvent = state.events.find((e) => e.status === "入力中") || state.events[2];
   const selectedRankings = useMemo(() => rankedEntries(state, selectedEvent), [state, selectedEvent]);
+  const selectedEventScores = useMemo(() => eventTeamScores(state, selectedEvent), [state, selectedEvent]);
   const visibleEvents = state.events.filter((e) => {
     const kindOk = kindFilter === "全て" || TYPE_LABEL[e.type].includes(kindFilter);
     const sexOk = sexFilter === "全て" || e.category === sexFilter || e.category === "共通";
@@ -292,10 +312,38 @@ export default function Home() {
   const stageMark = (code?: string) => {
     const value = code ? null : parseDigits(selectedEvent, draftValue);
     const results = { ...state.results, [selectedEvent.id]: { ...(state.results[selectedEvent.id] || {}) } };
-    results[selectedEvent.id][selectedAthlete.id] = { value, code };
+    if (selectedEvent.type === "field" && code !== "NM") {
+      const previous = results[selectedEvent.id][selectedAthlete.id] || { value: null };
+      const attempts = [...(previous.attempts || [])];
+      attempts[attemptNo - 1] = code === "FOUL" ? "FOUL" : value!;
+      const valid = attempts.filter((attempt): attempt is number => typeof attempt === "number");
+      results[selectedEvent.id][selectedAthlete.id] = {
+        value: valid.length ? Math.max(...valid) : null,
+        attempts,
+        code: attempts.length >= 3 && !valid.length ? "NM" : undefined,
+      };
+      setAttemptNo(Math.min(3, attemptNo + 1));
+    } else {
+      results[selectedEvent.id][selectedAthlete.id] = { value, code };
+    }
     setState({ ...state, results });
     setDraftValue("");
     setToast(`${selectedAthlete.name}の記録を仮保存しました`);
+    window.setTimeout(() => setToast(""), 2400);
+  };
+
+  const stageHighJump = (result: "SUCCESS" | "MISS" | "PASS") => {
+    const results = { ...state.results, [selectedEvent.id]: { ...(state.results[selectedEvent.id] || {}) } };
+    const previous = results[selectedEvent.id][selectedAthlete.id] || { value: null };
+    const attempts = [...(previous.attempts || []), result === "MISS" ? "MISS" : result === "PASS" ? "PASS" : 1600];
+    const misses = attempts.filter((v) => v === "MISS").length;
+    results[selectedEvent.id][selectedAthlete.id] = {
+      attempts,
+      value: result === "SUCCESS" ? Math.max(previous.value || 0, 1600) : previous.value,
+      code: misses >= 3 && !previous.value && result === "MISS" ? "NM" : undefined,
+    };
+    setState({ ...state, results });
+    setToast(`${selectedAthlete.name}：${result === "SUCCESS" ? "○ 成功" : result === "MISS" ? "× 失敗" : "－ パス"}`);
     window.setTimeout(() => setToast(""), 2400);
   };
 
@@ -493,7 +541,7 @@ export default function Home() {
               <p>各チーム上位{selectedEvent.slots}名の個人順位合計で比較します。</p>
             </div>
             <div className="score-grid">
-              {standings.map((team, i) => <div key={team.id}><span>{i + 1}位</span><b style={{ color: team.color }}>{team.name}</b><strong>{[6, 4, 2][i]}点</strong></div>)}
+              {selectedEventScores.map((team) => <div key={team.id}><span>{team.rank}位・順位合計 {team.sum}</span><b style={{ color: team.color }}>{team.name}</b><strong>{team.points}点</strong></div>)}
             </div>
           </div>
           <div className="codes">DNS：欠場　 DNF：途中棄権　 DQ：失格　 NM：記録なし　 PB：自己ベスト</div>
@@ -537,10 +585,12 @@ export default function Home() {
               {selectedEvent.type === "highjump" ? (
                 <div className="high-jump">
                   <h3>現在の高さ　1.60m</h3>
-                  <div><button className="success" onClick={() => stageMark()}>○<small>成功</small></button><button className="failure" onClick={() => stageMark("NM")}>×<small>失敗</small></button><button className="pass" onClick={() => stageMark("PASS")}>－<small>パス</small></button></div>
+                  <div><button className="success" onClick={() => stageHighJump("SUCCESS")}>○<small>成功</small></button><button className="failure" onClick={() => stageHighJump("MISS")}>×<small>失敗</small></button><button className="pass" onClick={() => stageHighJump("PASS")}>－<small>パス</small></button></div>
+                  <p className="attempt-history">試技履歴　{(state.results[selectedEvent.id]?.[selectedAthlete.id]?.attempts || []).map((attempt) => attempt === "MISS" ? "×" : attempt === "PASS" ? "－" : "○").join("　") || "未入力"}</p>
                 </div>
               ) : (
                 <>
+                  {selectedEvent.type === "field" && <div className="attempt-tabs">{[1, 2, 3].map((n) => <button key={n} className={attemptNo === n ? "active" : ""} onClick={() => setAttemptNo(n)}>第{n}試技<span>{formatMark(selectedEvent, { value: typeof state.results[selectedEvent.id]?.[selectedAthlete.id]?.attempts?.[n - 1] === "number" ? state.results[selectedEvent.id][selectedAthlete.id].attempts![n - 1] as number : null, code: state.results[selectedEvent.id]?.[selectedAthlete.id]?.attempts?.[n - 1] === "FOUL" ? "FOUL" : undefined })}</span></button>)}</div>}
                   <label className="record-input">
                     <span>{selectedEvent.type === "field" ? "記録（cm）" : "記録"}</span>
                     <input inputMode="decimal" pattern="[0-9.]*" value={draftValue} onChange={(e) => setDraftValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder={selectedEvent.type === "field" ? "例：542 → 5.42m" : "例：1234 → 12.34"} />
