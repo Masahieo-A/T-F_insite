@@ -1,0 +1,10 @@
+{
+  "name": "NANS KOUNAI 校内陸上競技大会",
+  "short_name": "校内大会速報",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2f5f7",
+  "theme_color": "#075aa5",
+  "lang": "ja",
+  "icons": []
+}
