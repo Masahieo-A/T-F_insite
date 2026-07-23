@@ -335,7 +335,10 @@ export default function Home() {
   const stageHighJump = (result: "SUCCESS" | "MISS" | "PASS") => {
     const results = { ...state.results, [selectedEvent.id]: { ...(state.results[selectedEvent.id] || {}) } };
     const previous = results[selectedEvent.id][selectedAthlete.id] || { value: null };
-    const attempts = [...(previous.attempts || []), result === "MISS" ? "MISS" : result === "PASS" ? "PASS" : 1600];
+    const attempts: AttemptValue[] = [
+      ...(previous.attempts || []),
+      result === "MISS" ? "MISS" : result === "PASS" ? "PASS" : 1600,
+    ];
     const misses = attempts.filter((v) => v === "MISS").length;
     results[selectedEvent.id][selectedAthlete.id] = {
       attempts,
