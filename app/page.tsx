@@ -146,7 +146,7 @@ export default function Home() {
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
   const [inputCodes, setInputCodes] = useState<Record<string, ResultStatus>>({});
   const [reviewing, setReviewing] = useState(false);
-  const [syncState, setSyncState] = useState<"同期済み" | "端末保存済み" | "同期中">("同期済み");
+  const [syncState, setSyncState] = useState<"同期済み" | "DB同期済み" | "端末保存済み" | "同期中">("同期済み");
   const [adminMode, setAdminMode] = useState<AdminMode>("status");
   const [registrationMode, setRegistrationMode] = useState<RegistrationMode>("athletes");
   const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
@@ -170,11 +170,12 @@ export default function Home() {
       if (active && cached) setState(cached);
       try {
         const response = await fetch("/api/state");
-        const data = await response.json() as { state?: unknown };
+        const data = await response.json() as { state?: unknown; source?: string };
         if (active && isMeetingState(data.state)) {
           setState(data.state);
           await idbPut("cache", "state", data.state);
         }
+        if (active && data.source === "google-sheets") setSyncState("DB同期済み");
       } catch {
         setSyncState("端末保存済み");
       }
@@ -223,7 +224,8 @@ export default function Home() {
         body: JSON.stringify({ state: next, actor: "大会端末", action, detail }),
       });
       if (!response.ok) throw new Error("sync failed");
-      setSyncState("同期済み");
+      const data = await response.json() as { source?: string };
+      setSyncState(data.source === "google-sheets" ? "DB同期済み" : "同期済み");
     } catch {
       await idbPut("queue", undefined, { state: next, action, detail, createdAt: currentEpoch() });
       setSyncState("端末保存済み");
@@ -981,7 +983,11 @@ export default function Home() {
         <section>
           <div className="result-head">
             <div className="event-title">スマートフォン記録入力　<span className="sync-label">{syncState}</span></div>
-            <div className="storage-note">入力確認と端末保存は利用できます。複数端末で共有する永続DBは現在未接続です。</div>
+            <div className="storage-note">
+              {syncState === "DB同期済み"
+                ? "Googleスプレッドシートへ永続保存し、複数端末で共有しています。"
+                : "入力確認と端末保存は利用できます。DB未接続時は複数端末で共有されません。"}
+            </div>
             <div className="input-selects">
               <select className="select" aria-label="入力種目" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "input")}>
                 {state.events.map((event) => <option key={event.id} value={event.id}>{fullEventName(event)}</option>)}
