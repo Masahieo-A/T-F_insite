@@ -30,6 +30,7 @@ export type Event = {
   name: string;
   category: "男子" | "女子" | "共通";
   kind: EventKind;
+  discipline?: "トラック" | "跳躍" | "投てき";
   direction: "asc" | "desc";
   unit: "seconds" | "meters";
   startTime: string;
@@ -170,16 +171,16 @@ export const athletes: Athlete[] = athleteRows.map(([name, kana, affiliation, te
 }));
 
 export const events: Event[] = [
-  { id: "60m", name: "60m", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "13:50", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "確定" },
-  { id: "250m", name: "250m（1周）", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "14:10", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "確定" },
-  { id: "long", name: "走幅跳", category: "共通", kind: "field", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "速報" },
-  { id: "high", name: "走高跳", category: "共通", kind: "field", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 2, status: "入力中" },
-  { id: "shot", name: "砲丸投", category: "共通", kind: "field", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "速報" },
-  { id: "500m", name: "500m（2周）", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "15:45", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 2, status: "編成済み" },
-  { id: "1000m", name: "1000m（4周）", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "16:05", round: "決　勝", scoringSlots: 2, status: "編成済み" },
-  { id: "declare", name: "申告タイム250m", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "16:30", round: "特別競技", scoringSlots: 2, status: "編成済み" },
-  { id: "relay", name: "4×250mリレー", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "16:55", round: "決　勝", scoringSlots: 1, status: "編成済み" },
-  { id: "shuttle", name: "12×50m全員シャトルR", category: "共通", kind: "track", direction: "asc", unit: "seconds", startTime: "17:30", round: "決　勝", scoringSlots: 1, status: "編成済み" },
+  { id: "60m", name: "60m", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "13:50", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "確定" },
+  { id: "250m", name: "250m（1周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "14:10", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "確定" },
+  { id: "long", name: "走幅跳", category: "共通", kind: "field", discipline: "跳躍", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "速報" },
+  { id: "high", name: "走高跳", category: "共通", kind: "field", discipline: "跳躍", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 2, status: "入力中" },
+  { id: "shot", name: "砲丸投", category: "共通", kind: "field", discipline: "投てき", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "速報" },
+  { id: "500m", name: "500m（2周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "15:45", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 2, status: "編成済み" },
+  { id: "1000m", name: "1000m（4周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:05", round: "決　勝", scoringSlots: 2, status: "編成済み" },
+  { id: "declare", name: "申告タイム250m", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:30", round: "特別競技", scoringSlots: 2, status: "編成済み" },
+  { id: "relay", name: "4×250mリレー", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:55", round: "決　勝", scoringSlots: 1, status: "編成済み" },
+  { id: "shuttle", name: "12×50m全員シャトルR", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "17:30", round: "決　勝", scoringSlots: 1, status: "編成済み" },
 ];
 
 const heatCounts: Record<string, number> = {

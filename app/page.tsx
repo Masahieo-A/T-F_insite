@@ -21,10 +21,18 @@ import {
   type RankedResult,
 } from "@/lib/ranking";
 import { applyBulkCsv, createBulkCsvTemplate } from "@/lib/adminCsv";
+import {
+  applyAthleteCsv,
+  applyAthleteEventAssignments,
+  createAthleteCsvTemplate,
+  eventIdsForAthlete,
+} from "@/lib/registration";
 
-type View = "schedule" | "results" | "team" | "input" | "admin";
+type View = "schedule" | "results" | "team" | "input" | "registration" | "admin";
 type ResultMode = "heats" | "overall" | "band";
 type AdminMode = "status" | "athletes" | "entries" | "corrections" | "audit";
+type RegistrationMode = "athletes" | "events" | "assignments";
+type Discipline = "トラック" | "跳躍" | "投てき";
 
 const RESULT_CODES: ResultStatus[] = ["DNS", "DNF", "DQ", "NM"];
 const EVENT_STATUSES: EventStatus[] = ["編成済み", "入力中", "速報", "確定", "訂正中"];
@@ -93,6 +101,7 @@ async function idbGetState(): Promise<MeetingState | null> {
 }
 
 function eventDiscipline(event: Event) {
+  if (event.discipline) return event.discipline;
   if (event.id === "shot") return "投てき";
   if (["long", "high"].includes(event.id)) return "跳躍";
   return "トラック";
@@ -139,10 +148,16 @@ export default function Home() {
   const [reviewing, setReviewing] = useState(false);
   const [syncState, setSyncState] = useState<"同期済み" | "端末保存済み" | "同期中">("同期済み");
   const [adminMode, setAdminMode] = useState<AdminMode>("status");
+  const [registrationMode, setRegistrationMode] = useState<RegistrationMode>("athletes");
   const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
   const [adminCodes, setAdminCodes] = useState<Record<string, ResultStatus>>({});
   const [adminReason, setAdminReason] = useState("");
-  const [eventDrafts, setEventDrafts] = useState<Record<string, { name?: string; startTime?: string }>>({});
+  const [eventDrafts, setEventDrafts] = useState<Record<string, { name?: string; startTime?: string; discipline?: Discipline }>>({});
+  const [athleteDrafts, setAthleteDrafts] = useState<Record<string, { name?: string; sex?: "男子" | "女子" }>>({});
+  const [newAthleteBib, setNewAthleteBib] = useState("");
+  const [newAthleteName, setNewAthleteName] = useState("");
+  const [newAthleteSex, setNewAthleteSex] = useState<"男子" | "女子">("男子");
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({});
   const [newEntryHeatId, setNewEntryHeatId] = useState("");
   const [newEntryAthleteId, setNewEntryAthleteId] = useState("");
   const [newEntryLane, setNewEntryLane] = useState("");
@@ -173,6 +188,8 @@ export default function Home() {
   const selectedHeat = selectedHeats.find((heat) => heat.id === selectedHeatId) ?? selectedHeats[0];
   const heatEntries = state.entries.filter((entry) => entry.heatId === selectedHeat?.id);
   const eventEntries = state.entries.filter((entry) => entry.eventId === selectedEvent.id);
+  const inputChangeCount = heatEntries.filter((entry) =>
+    Boolean(inputCodes[entry.id] || inputDrafts[entry.id])).length;
 
   const transactions = useMemo(() => state.events
     .filter((event) => ["速報", "確定"].includes(event.status))
@@ -283,6 +300,12 @@ export default function Home() {
     };
     await persist(next, "速報保存", `${selectedEvent.name} ${selectedHeat.number}組`);
     setReviewing(false);
+    setInputDrafts((current) => Object.fromEntries(
+      Object.entries(current).filter(([entryId]) => !heatEntries.some((entry) => entry.id === entryId)),
+    ));
+    setInputCodes((current) => Object.fromEntries(
+      Object.entries(current).filter(([entryId]) => !heatEntries.some((entry) => entry.id === entryId)),
+    ) as Record<string, ResultStatus>);
     setMessage("速報を保存しました");
   };
 
@@ -312,6 +335,7 @@ export default function Home() {
     const draft = eventDrafts[eventId] ?? {};
     const name = (draft.name ?? event.name).trim();
     const startTime = draft.startTime ?? event.startTime;
+    const discipline = draft.discipline ?? eventDiscipline(event);
     if (!name) {
       setMessage("種目名を入力してください");
       return;
@@ -320,7 +344,7 @@ export default function Home() {
       setMessage("開始時刻はHH:MM形式で入力してください");
       return;
     }
-    if (name === event.name && startTime === event.startTime) {
+    if (name === event.name && startTime === event.startTime && discipline === eventDiscipline(event)) {
       setMessage("変更内容がありません");
       return;
     }
@@ -328,7 +352,15 @@ export default function Home() {
     const next: MeetingState = {
       ...state,
       events: state.events.map((candidate) =>
-        candidate.id === eventId ? { ...candidate, name, startTime } : candidate),
+        candidate.id === eventId ? {
+          ...candidate,
+          name,
+          startTime,
+          discipline,
+          kind: discipline === "トラック" ? "track" : "field",
+          direction: discipline === "トラック" ? "asc" : "desc",
+          unit: discipline === "トラック" ? "seconds" : "meters",
+        } : candidate),
       heats: state.heats.map((heat) =>
         heat.eventId === eventId ? { ...heat, callCompleteAt: callCompleteAtFromStart(startTime) } : heat),
       auditLogs: [{
@@ -337,19 +369,19 @@ export default function Home() {
         actor: "大会管理者",
         action: "競技情報変更",
         entity: event.name,
-        before: `${event.name} ${event.startTime}`,
-        after: `${name} ${startTime}`,
+        before: `${event.name} ${event.startTime} ${eventDiscipline(event)}`,
+        after: `${name} ${startTime} ${discipline}`,
         reason: "管理画面操作",
       }, ...state.auditLogs],
       updatedAt: now,
     };
-    await persist(next, "競技情報変更", `${event.name} ${event.startTime}→${name} ${startTime}`);
+    await persist(next, "競技情報変更", `${event.name} ${event.startTime}→${name} ${startTime} ${discipline}`);
     setEventDrafts((current) => {
       const updated = { ...current };
       delete updated[eventId];
       return updated;
     });
-    setMessage(`${name}の種目名・開始時刻を更新しました`);
+    setMessage(`${name}の種目種類・開始時刻を更新しました`);
   };
 
   const saveCorrections = async () => {
@@ -449,6 +481,176 @@ export default function Home() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const downloadAthleteTemplate = () => {
+    const blob = new Blob(["\uFEFF", createAthleteCsvTemplate(state)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "校内大会_競技者登録テンプレート.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setMessage("競技者登録CSVテンプレートをダウンロードしました");
+  };
+
+  const importAthleteCsv = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const imported = applyAthleteCsv(state, String(reader.result));
+        const now = currentTime();
+        const next: MeetingState = {
+          ...imported.state,
+          auditLogs: [{
+            id: crypto.randomUUID(),
+            at: now,
+            actor: "大会管理者",
+            action: "競技者CSV取込",
+            entity: `${imported.athleteCount}名`,
+            before: `${state.athletes.length}名`,
+            after: `${imported.athleteCount}名`,
+            reason: file.name,
+          }, ...imported.state.auditLogs],
+          updatedAt: now,
+        };
+        await persist(next, "競技者CSV取込", `${file.name}: ${imported.athleteCount}名`);
+        setAssignmentDrafts({});
+        setMessage(`競技者CSVを反映しました（${imported.athleteCount}名）`);
+      } catch (error) {
+        setMessage(error instanceof Error ? `CSV取込エラー: ${error.message}` : "CSVの取込に失敗しました");
+      } finally {
+        event.target.value = "";
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const saveAthleteDetails = async (athleteId: string) => {
+    const athlete = state.athletes.find((candidate) => candidate.id === athleteId)!;
+    const draft = athleteDrafts[athleteId] ?? {};
+    const name = (draft.name ?? athlete.name).trim();
+    const sex = draft.sex ?? athlete.sex;
+    if (!name) {
+      setMessage("競技者氏名を入力してください");
+      return;
+    }
+    if (name === athlete.name && sex === athlete.sex) {
+      setMessage("変更内容がありません");
+      return;
+    }
+    const now = currentTime();
+    const next: MeetingState = {
+      ...state,
+      athletes: state.athletes.map((candidate) =>
+        candidate.id === athleteId ? { ...candidate, name, sex } : candidate),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "競技者情報変更",
+        entity: `No.${athlete.bib}`,
+        before: `${athlete.name} ${athlete.sex}`,
+        after: `${name} ${sex}`,
+        reason: "エントリ登録画面",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "競技者情報変更", `No.${athlete.bib}: ${athlete.name}→${name}`);
+    setAthleteDrafts((current) => {
+      const updated = { ...current };
+      delete updated[athleteId];
+      return updated;
+    });
+    setMessage(`No.${athlete.bib} ${name}を更新しました`);
+  };
+
+  const addAthlete = async () => {
+    const bib = Number(newAthleteBib || Math.max(100, ...state.athletes.map((athlete) => athlete.bib)) + 1);
+    const name = newAthleteName.trim();
+    if (!Number.isInteger(bib) || bib < 1 || !name) {
+      setMessage("選手Noと氏名を正しく入力してください");
+      return;
+    }
+    if (state.athletes.some((athlete) => athlete.bib === bib)) {
+      setMessage(`選手No ${bib} は登録済みです`);
+      return;
+    }
+    const now = currentTime();
+    const athlete = {
+      id: `athlete-${crypto.randomUUID()}`,
+      bib,
+      name,
+      kana: name,
+      grade: 1,
+      sex: newAthleteSex,
+      teamId: state.teams[0]?.id ?? "red",
+      affiliation: "校内",
+      region: "校内",
+      abilityBand: "C" as const,
+      personalBests: {},
+    };
+    const next: MeetingState = {
+      ...state,
+      athletes: [...state.athletes, athlete].sort((left, right) => left.bib - right.bib),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "競技者追加",
+        entity: `No.${bib}`,
+        before: "未登録",
+        after: `${name} ${newAthleteSex}`,
+        reason: "エントリ登録画面",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "競技者追加", `No.${bib} ${name}`);
+    setNewAthleteBib("");
+    setNewAthleteName("");
+    setMessage(`${name}を競技者登録しました`);
+  };
+
+  const assignmentFor = (athleteId: string) =>
+    assignmentDrafts[athleteId] ?? eventIdsForAthlete(state, athleteId);
+
+  const updateAssignment = (athleteId: string, slot: number, eventId: string) => {
+    const current = [...assignmentFor(athleteId)];
+    while (current.length < 3) current.push("");
+    current[slot] = eventId;
+    setAssignmentDrafts((drafts) => ({ ...drafts, [athleteId]: current }));
+  };
+
+  const saveAssignments = async () => {
+    const assignments = Object.fromEntries(state.athletes.map((athlete) => [
+      athlete.id,
+      assignmentFor(athlete.id),
+    ]));
+    try {
+      const assigned = applyAthleteEventAssignments(state, assignments);
+      const now = currentTime();
+      const next: MeetingState = {
+        ...assigned,
+        auditLogs: [{
+          id: crypto.randomUUID(),
+          at: now,
+          actor: "大会管理者",
+          action: "選手種目登録",
+          entity: `${state.athletes.length}名`,
+          before: `${state.entries.length}エントリー`,
+          after: `${assigned.entries.length}エントリー`,
+          reason: "表形式一括保存",
+        }, ...state.auditLogs],
+        updatedAt: now,
+      };
+      await persist(next, "選手種目登録", `${state.athletes.length}名・${assigned.entries.length}エントリー`);
+      setAssignmentDrafts({});
+      setMessage(`選手種目登録を保存しました（${assigned.entries.length}エントリー）`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "選手種目登録の保存に失敗しました");
+    }
   };
 
   const changeEntryAthlete = async (entryId: string, athleteId: string) => {
@@ -572,7 +774,9 @@ export default function Home() {
         ? "対抗戦集計（2026/07/23）"
         : view === "input"
           ? "記録入力（2026/07/23）"
-          : "大会管理（2026/07/23）";
+          : view === "registration"
+            ? "エントリ登録（2026/07/23）"
+            : "大会管理（2026/07/23）";
 
   const renderResultRow = (item: RankedResult, event: Event, showRank = false) => {
     const team = state.teams.find((candidate) => candidate.id === item.athlete.teamId)!;
@@ -664,6 +868,7 @@ export default function Home() {
           </div>
           <div className="staff-links">
             <a href="#" onClick={(event) => { event.preventDefault(); openEvent("60m", "input"); }}>記録入力</a>
+            <a href="#" onClick={(event) => { event.preventDefault(); setView("registration"); window.scrollTo(0, 0); }}>エントリ登録</a>
             <a href="#" onClick={(event) => { event.preventDefault(); setView("admin"); }}>大会管理</a>
           </div>
         </section>
@@ -774,6 +979,7 @@ export default function Home() {
         <section>
           <div className="result-head">
             <div className="event-title">スマートフォン記録入力　<span className="sync-label">{syncState}</span></div>
+            <div className="storage-note">入力確認と端末保存は利用できます。複数端末で共有する永続DBは現在未接続です。</div>
             <div className="input-selects">
               <select className="select" aria-label="入力種目" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "input")}>
                 {state.events.map((event) => <option key={event.id} value={event.id}>{fullEventName(event)}</option>)}
@@ -800,6 +1006,7 @@ export default function Home() {
                         aria-label={`${athlete.name}の記録`}
                         inputMode="decimal"
                         pattern="[0-9.:]*"
+                        disabled={Boolean(inputCodes[entry.id])}
                         value={inputDrafts[entry.id] ?? ""}
                         placeholder={existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : ""}
                         onChange={(event) => updateDraft(entry.id, event.target.value, "input")}
@@ -808,7 +1015,17 @@ export default function Home() {
                     </td>
                     <td>
                       <div className="code-row">
-                        {RESULT_CODES.map((code) => <button key={code} className={inputCodes[entry.id] === code ? "selected" : ""} onClick={() => setInputCodes((current) => ({ ...current, [entry.id]: code }))}>{code}</button>)}
+                        {RESULT_CODES.map((code) => <button
+                          key={code}
+                          className={inputCodes[entry.id] === code ? "selected" : ""}
+                          aria-pressed={inputCodes[entry.id] === code}
+                          onClick={() => setInputCodes((current) => {
+                            const next = { ...current };
+                            if (next[entry.id] === code) delete next[entry.id];
+                            else next[entry.id] = code;
+                            return next;
+                          })}
+                        >{code}</button>)}
                       </div>
                     </td>
                   </tr>
@@ -816,8 +1033,15 @@ export default function Home() {
               })}</tbody>
             </table>
           </div>
+          <div className="input-summary">今回の入力：{inputChangeCount}件 ／ 未変更：{heatEntries.length - inputChangeCount}件</div>
           <div className="input-actions">
-            <button className="darkbtn" onClick={() => setReviewing(true)}>入力内容を確認</button>
+            <button className="darkbtn" onClick={() => {
+              if (!inputChangeCount) {
+                setMessage("記録またはDNS・DNF・DQ・NMを1件以上入力してください");
+                return;
+              }
+              setReviewing(true);
+            }}>入力内容を確認</button>
           </div>
           {reviewing && (
             <div className="review-section">
@@ -827,14 +1051,132 @@ export default function Home() {
                   <thead><tr><th>ﾚｰﾝ</th><th>競技者名</th><th>保存内容</th></tr></thead>
                   <tbody>{heatEntries.map((entry) => {
                     const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
-                    const value = inputCodes[entry.id] || formatPerformance(normalizePerformance(inputDrafts[entry.id] || "", selectedEvent), selectedEvent) || "変更なし";
-                    return <tr key={entry.id}><td>{entry.laneOrOrder}</td><td>{athlete.name}</td><td>{value}</td></tr>;
+                    const existing = getResult(state, entry.id);
+                    const value = inputCodes[entry.id]
+                      || formatPerformance(normalizePerformance(inputDrafts[entry.id] || "", selectedEvent), selectedEvent)
+                      || (existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : existing?.status)
+                      || "未入力";
+                    const changed = Boolean(inputCodes[entry.id] || inputDrafts[entry.id]);
+                    return <tr key={entry.id}><td>{entry.laneOrOrder}</td><td>{athlete.name}</td><td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
                   })}</tbody>
                 </table>
               </div>
               <div className="input-actions"><button className="mutedbtn" onClick={() => setReviewing(false)}>入力へ戻る</button><button className="darkbtn" onClick={saveProvisional}>速報保存</button></div>
             </div>
           )}
+        </section>
+      )}
+
+      {view === "registration" && (
+        <section>
+          <div className="result-head">
+            <div className="event-title">エントリ登録</div>
+            <div className="subseg registration-seg">
+              {([
+                ["athletes", "競技者登録"],
+                ["events", "種目設定"],
+                ["assignments", "選手種目登録"],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={registrationMode === key ? "active" : ""}
+                  onClick={() => setRegistrationMode(key)}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {registrationMode === "athletes" && <>
+            <div className="csv-workflow">
+              <div className="workflow-title">競技者CSV一括取り込み</div>
+              <ol>
+                <li>現在の競技者入りテンプレートをダウンロード</li>
+                <li>氏名・性別などを編集してCSV形式で保存</li>
+                <li>編集済みCSVを取り込み、サイトへ反映</li>
+              </ol>
+              <div className="admin-tools csv-actions">
+                <button className="goldbtn" onClick={downloadAthleteTemplate}>1. テンプレートをDL</button>
+                <label className="darkbtn filebtn">3. 編集済みCSVを取り込む
+                  <input type="file" accept=".csv,text/csv" onChange={importAthleteCsv} />
+                </label>
+              </div>
+              <p>必須列は選手No・氏名・性別・学年・チームID・実力帯です。CSVから削除した選手はエントリーからも外れます。</p>
+            </div>
+            <div className="athlete-add">
+              <div className="workflow-title">競技者を個別追加</div>
+              <label>選手No
+                <input className="admin-text-field" inputMode="numeric" pattern="[0-9]*" placeholder="自動" value={newAthleteBib} onChange={(event) => setNewAthleteBib(event.target.value.replace(/\D/g, ""))} />
+              </label>
+              <label>氏名
+                <input className="admin-text-field" value={newAthleteName} onChange={(event) => setNewAthleteName(event.target.value)} />
+              </label>
+              <label>性別
+                <select className="compact-select" value={newAthleteSex} onChange={(event) => setNewAthleteSex(event.target.value as "男子" | "女子")}>
+                  <option>男子</option><option>女子</option>
+                </select>
+              </label>
+              <button className="darkbtn" onClick={addAthlete}>競技者を追加</button>
+            </div>
+            <div className="admin-note">競技者の氏名・性別は行ごとに変更できます。</div>
+            <div className="tablewrap">
+              <table className="grid athlete-registration-grid">
+                <thead><tr><th>No</th><th>競技者氏名</th><th>性別</th><th>保存</th></tr></thead>
+                <tbody>{state.athletes.map((athlete) => (
+                  <tr key={athlete.id}>
+                    <td>{athlete.bib}</td>
+                    <td><input className="admin-text-field" value={athleteDrafts[athlete.id]?.name ?? athlete.name} onChange={(event) => setAthleteDrafts((current) => ({ ...current, [athlete.id]: { ...current[athlete.id], name: event.target.value } }))} /></td>
+                    <td><select className="compact-select" value={athleteDrafts[athlete.id]?.sex ?? athlete.sex} onChange={(event) => setAthleteDrafts((current) => ({ ...current, [athlete.id]: { ...current[athlete.id], sex: event.target.value as "男子" | "女子" } }))}><option>男子</option><option>女子</option></select></td>
+                    <td><button className="row-save-button" onClick={() => saveAthleteDetails(athlete.id)}>保存</button></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </>}
+
+          {registrationMode === "events" && <>
+            <div className="admin-note">大会で行う種目の名称・種類・開始時刻をサイト上で変更し、行ごとに保存できます。</div>
+            <div className="tablewrap">
+              <table className="grid event-registration-grid">
+                <thead><tr><th>開始時刻</th><th>種目名</th><th>種類</th><th>保存</th></tr></thead>
+                <tbody>{state.events.map((event) => (
+                  <tr key={event.id}>
+                    <td><input className="admin-text-field time-field" type="time" value={eventDrafts[event.id]?.startTime ?? event.startTime} onChange={(change) => setEventDrafts((current) => ({ ...current, [event.id]: { ...current[event.id], startTime: change.target.value } }))} /></td>
+                    <td><input className="admin-text-field" value={eventDrafts[event.id]?.name ?? event.name} onChange={(change) => setEventDrafts((current) => ({ ...current, [event.id]: { ...current[event.id], name: change.target.value } }))} /></td>
+                    <td><select className="compact-select" value={eventDrafts[event.id]?.discipline ?? eventDiscipline(event)} onChange={(change) => setEventDrafts((current) => ({ ...current, [event.id]: { ...current[event.id], discipline: change.target.value as Discipline } }))}><option>トラック</option><option>跳躍</option><option>投てき</option></select></td>
+                    <td><button className="row-save-button" onClick={() => saveEventDetails(event.id)}>保存</button></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </>}
+
+          {registrationMode === "assignments" && <>
+            <div className="admin-note">競技者ごとに最大3種目を選択します。プルダウンは「種目設定」の登録内容を参照します。</div>
+            <div className="tablewrap assignment-wrap">
+              <table className="grid assignment-grid">
+                <thead><tr><th>ナンバー</th><th>競技者名</th><th>性別</th><th>参加競技1</th><th>参加競技2</th><th>参加競技3</th></tr></thead>
+                <tbody>{state.athletes.map((athlete) => {
+                  const selected = assignmentFor(athlete.id);
+                  return (
+                    <tr key={athlete.id}>
+                      <td>{athlete.bib}</td>
+                      <td className="event"><div className="kana">{athlete.kana}</div>{athlete.name}</td>
+                      <td>{athlete.sex}</td>
+                      {[0, 1, 2].map((slot) => (
+                        <td key={slot}>
+                          <select className="assignment-select" aria-label={`${athlete.name}の参加競技${slot + 1}`} value={selected[slot] ?? ""} onChange={(event) => updateAssignment(athlete.id, slot, event.target.value)}>
+                            <option value="">未選択</option>
+                            {state.events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+                          </select>
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+            <div className="input-actions assignment-actions"><button className="darkbtn" onClick={saveAssignments}>選手種目登録を保存</button></div>
+          </>}
         </section>
       )}
 

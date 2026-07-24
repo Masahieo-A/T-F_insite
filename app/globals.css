@@ -289,6 +289,20 @@ button:disabled { cursor: not-allowed; }
   gap: 10px;
   padding: 0 10px 24px;
 }
+.input-summary,
+.storage-note {
+  padding: 0 10px 10px;
+  font-size: 14px;
+  color: #444;
+}
+.storage-note {
+  padding: 0 0 10px;
+}
+.review-source {
+  display: block;
+  font-size: 11px;
+  color: #555;
+}
 .review-section {
   border-top: 4px solid var(--blue);
   padding-top: 1px;
@@ -380,6 +394,21 @@ button:disabled { cursor: not-allowed; }
   gap: 10px;
   align-items: end;
 }
+.athlete-add {
+  margin: 0 14px 18px;
+  padding: 12px;
+  border: 2px solid var(--line);
+  display: grid;
+  grid-template-columns: .7fr 2fr .8fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.athlete-add .workflow-title { grid-column: 1 / -1; }
+.athlete-add label {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
 .entry-add .workflow-title { grid-column: 1 / -1; }
 .entry-add label {
   display: grid;
@@ -427,6 +456,40 @@ button:disabled { cursor: not-allowed; }
 .audit-grid th:nth-child(3) { width: 17%; }
 .audit-grid th:nth-child(4) { width: 20%; }
 .audit-grid th:nth-child(5) { width: 30%; }
+.registration-seg { width: 100%; }
+.registration-seg button { flex: 1; }
+.athlete-registration-grid th:nth-child(1) { width: 13%; }
+.athlete-registration-grid th:nth-child(2) { width: 49%; }
+.athlete-registration-grid th:nth-child(3) { width: 20%; }
+.athlete-registration-grid th:nth-child(4) { width: 18%; }
+.event-registration-grid th:nth-child(1) { width: 20%; }
+.event-registration-grid th:nth-child(2) { width: 39%; }
+.event-registration-grid th:nth-child(3) { width: 23%; }
+.event-registration-grid th:nth-child(4) { width: 18%; }
+.assignment-grid { font-size: 13px; }
+.assignment-grid th { background: #727272; font-weight: 700; }
+.assignment-grid th:nth-child(1) { width: 11%; }
+.assignment-grid th:nth-child(2) { width: 23%; }
+.assignment-grid th:nth-child(3) { width: 10%; }
+.assignment-grid th:nth-child(n+4) { width: 18.66%; }
+.assignment-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid #777;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font-size: 12px;
+}
+.assignment-actions {
+  position: sticky;
+  bottom: 0;
+  border-top: 2px solid var(--blue);
+  background: #fff;
+  padding-top: 10px;
+  z-index: 8;
+}
 .darkbtn:disabled { background: #bbb; border-color: #999; }
 
 .message {
@@ -496,6 +559,7 @@ button:disabled { cursor: not-allowed; }
   .code-row { grid-template-columns: repeat(2, 1fr); }
   .code-row button { min-height: 27px; font-size: 10px; }
   .input-actions { padding-bottom: 18px; }
+  .storage-note, .input-summary { font-size: 12px; }
   .admin-seg button { font-size: 13px; padding: 9px 11px; }
   .admin-tools { padding: 0 10px 14px; gap: 8px; }
   .admin-note { padding: 0 10px 10px; font-size: 13px; }
@@ -508,6 +572,12 @@ button:disabled { cursor: not-allowed; }
     padding: 9px;
     grid-template-columns: 1fr 1fr;
   }
+  .athlete-add {
+    margin: 0 5px 14px;
+    padding: 9px;
+    grid-template-columns: .8fr 1.5fr .8fr;
+  }
+  .athlete-add .darkbtn { grid-column: 1 / -1; }
   .entry-add label:nth-of-type(3),
   .entry-add .darkbtn { grid-column: 1 / -1; }
   .entry-master { font-size: 12px; }
@@ -515,6 +585,13 @@ button:disabled { cursor: not-allowed; }
   .reason-field { min-width: 170px; min-height: 42px; font-size: 14px; }
   .compact-select { min-height: 34px; font-size: 12px; }
   .athlete-master, .audit-grid { font-size: 13px; }
+  .registration-seg button { padding-left: 5px; padding-right: 5px; font-size: 13px; }
+  .assignment-wrap { overflow-x: hidden; }
+  .assignment-grid { font-size: 10px; }
+  .assignment-grid th, .assignment-grid td { padding: 4px 2px; }
+  .assignment-grid .kana { font-size: 9px; }
+  .assignment-select { min-height: 32px; padding: 1px; font-size: 10px; }
+  .athlete-registration-grid, .event-registration-grid { font-size: 12px; }
 }
 
 @media (max-width: 410px) {
