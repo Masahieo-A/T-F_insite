@@ -624,10 +624,12 @@ export default function Home() {
   };
 
   const saveAssignments = async () => {
-    const assignments = Object.fromEntries(state.athletes.map((athlete) => [
-      athlete.id,
-      assignmentFor(athlete.id),
-    ]));
+    const assignments = assignmentDrafts;
+    const changedAthleteCount = Object.keys(assignments).length;
+    if (!changedAthleteCount) {
+      setMessage("変更した選手種目がありません");
+      return;
+    }
     try {
       const assigned = applyAthleteEventAssignments(state, assignments);
       const now = currentTime();
@@ -638,14 +640,14 @@ export default function Home() {
           at: now,
           actor: "大会管理者",
           action: "選手種目登録",
-          entity: `${state.athletes.length}名`,
+          entity: `${changedAthleteCount}名`,
           before: `${state.entries.length}エントリー`,
           after: `${assigned.entries.length}エントリー`,
           reason: "表形式一括保存",
         }, ...state.auditLogs],
         updatedAt: now,
       };
-      await persist(next, "選手種目登録", `${state.athletes.length}名・${assigned.entries.length}エントリー`);
+      await persist(next, "選手種目登録", `${changedAthleteCount}名変更・${assigned.entries.length}エントリー`);
       setAssignmentDrafts({});
       setMessage(`選手種目登録を保存しました（${assigned.entries.length}エントリー）`);
     } catch (error) {
