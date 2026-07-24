@@ -20,6 +20,7 @@ import {
   sanitizeNumericInput,
   type RankedResult,
 } from "@/lib/ranking";
+import { applyBulkCsv, createBulkCsvTemplate } from "@/lib/adminCsv";
 
 type View = "schedule" | "results" | "team" | "input" | "admin";
 type ResultMode = "heats" | "overall" | "band";
@@ -27,6 +28,20 @@ type AdminMode = "status" | "athletes" | "entries" | "corrections" | "audit";
 
 const RESULT_CODES: ResultStatus[] = ["DNS", "DNF", "DQ", "NM"];
 const EVENT_STATUSES: EventStatus[] = ["編成済み", "入力中", "速報", "確定", "訂正中"];
+
+function currentTime() {
+  return new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function currentEpoch() {
+  return Date.now();
+}
+
+function callCompleteAtFromStart(startTime: string) {
+  const [hours, minutes] = startTime.split(":").map(Number);
+  const totalMinutes = (hours * 60 + minutes - 5 + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+}
 
 function isMeetingState(value: unknown): value is MeetingState {
   if (!value || typeof value !== "object") return false;
@@ -127,6 +142,10 @@ export default function Home() {
   const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
   const [adminCodes, setAdminCodes] = useState<Record<string, ResultStatus>>({});
   const [adminReason, setAdminReason] = useState("");
+  const [eventDrafts, setEventDrafts] = useState<Record<string, { name?: string; startTime?: string }>>({});
+  const [newEntryHeatId, setNewEntryHeatId] = useState("");
+  const [newEntryAthleteId, setNewEntryAthleteId] = useState("");
+  const [newEntryLane, setNewEntryLane] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -189,7 +208,7 @@ export default function Home() {
       if (!response.ok) throw new Error("sync failed");
       setSyncState("同期済み");
     } catch {
-      await idbPut("queue", undefined, { state: next, action, detail, createdAt: Date.now() });
+      await idbPut("queue", undefined, { state: next, action, detail, createdAt: currentEpoch() });
       setSyncState("端末保存済み");
     }
   };
@@ -197,7 +216,11 @@ export default function Home() {
   const openEvent = (eventId: string, nextView: View = "results") => {
     const heat = state.heats.find((candidate) => candidate.eventId === eventId);
     setSelectedEventId(eventId);
-    if (heat) setSelectedHeatId(heat.id);
+    if (heat) {
+      setSelectedHeatId(heat.id);
+      setNewEntryHeatId(heat.id);
+    }
+    setNewEntryLane("");
     setResultMode("heats");
     setReviewing(false);
     setView(nextView);
@@ -284,6 +307,51 @@ export default function Home() {
     await persist(next, "状態変更", `${event.name}: ${event.status}→${status}`);
   };
 
+  const saveEventDetails = async (eventId: string) => {
+    const event = state.events.find((candidate) => candidate.id === eventId)!;
+    const draft = eventDrafts[eventId] ?? {};
+    const name = (draft.name ?? event.name).trim();
+    const startTime = draft.startTime ?? event.startTime;
+    if (!name) {
+      setMessage("種目名を入力してください");
+      return;
+    }
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
+      setMessage("開始時刻はHH:MM形式で入力してください");
+      return;
+    }
+    if (name === event.name && startTime === event.startTime) {
+      setMessage("変更内容がありません");
+      return;
+    }
+    const now = currentTime();
+    const next: MeetingState = {
+      ...state,
+      events: state.events.map((candidate) =>
+        candidate.id === eventId ? { ...candidate, name, startTime } : candidate),
+      heats: state.heats.map((heat) =>
+        heat.eventId === eventId ? { ...heat, callCompleteAt: callCompleteAtFromStart(startTime) } : heat),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "競技情報変更",
+        entity: event.name,
+        before: `${event.name} ${event.startTime}`,
+        after: `${name} ${startTime}`,
+        reason: "管理画面操作",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "競技情報変更", `${event.name} ${event.startTime}→${name} ${startTime}`);
+    setEventDrafts((current) => {
+      const updated = { ...current };
+      delete updated[eventId];
+      return updated;
+    });
+    setMessage(`${name}の種目名・開始時刻を更新しました`);
+  };
+
   const saveCorrections = async () => {
     if (!adminReason.trim()) return;
     const nextResults = [...state.results];
@@ -333,16 +401,167 @@ export default function Home() {
     setMessage("訂正を保存し、状態を「訂正中」にしました");
   };
 
-  const importAthletes = (event: ChangeEvent<HTMLInputElement>) => {
+  const downloadBulkTemplate = () => {
+    const csv = createBulkCsvTemplate(state);
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "校内大会_選手エントリーテンプレート.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setMessage("現在の登録内容を入れたCSVテンプレートをダウンロードしました");
+  };
+
+  const importBulkCsv = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      const rows = String(reader.result).split(/\r?\n/).slice(1).filter(Boolean);
-      if (!rows.length) return;
-      setMessage(`CSV ${rows.length}件を確認しました。既存選手マスタは管理画面でのみ更新されます。`);
+    reader.onload = async () => {
+      try {
+        const imported = applyBulkCsv(state, String(reader.result));
+        const now = currentTime();
+        const eventsById = new Map(imported.state.events.map((item) => [item.id, item]));
+        const next: MeetingState = {
+          ...imported.state,
+          heats: imported.state.heats.map((heat) => {
+            const item = eventsById.get(heat.eventId)!;
+            return { ...heat, callCompleteAt: callCompleteAtFromStart(item.startTime) };
+          }),
+          auditLogs: [{
+            id: crypto.randomUUID(),
+            at: now,
+            actor: "大会管理者",
+            action: "CSV一括取込",
+            entity: `${imported.eventCount}種目`,
+            before: "取込前",
+            after: `${imported.rowCount}エントリー・選手${imported.athleteCount}名`,
+            reason: file.name,
+          }, ...imported.state.auditLogs],
+          updatedAt: now,
+        };
+        await persist(next, "CSV一括取込", `${file.name}: ${imported.rowCount}件`);
+        setMessage(`CSVを反映しました（${imported.eventCount}種目・${imported.rowCount}エントリー）`);
+      } catch (error) {
+        setMessage(error instanceof Error ? `CSV取込エラー: ${error.message}` : "CSVの取込に失敗しました");
+      } finally {
+        event.target.value = "";
+      }
     };
     reader.readAsText(file);
+  };
+
+  const changeEntryAthlete = async (entryId: string, athleteId: string) => {
+    const entry = state.entries.find((candidate) => candidate.id === entryId)!;
+    if (entry.athleteId === athleteId) return;
+    const before = state.athletes.find((athlete) => athlete.id === entry.athleteId)!;
+    const after = state.athletes.find((athlete) => athlete.id === athleteId)!;
+    if (state.entries.some((candidate) =>
+      candidate.eventId === entry.eventId && candidate.athleteId === athleteId && candidate.id !== entryId)) {
+      setMessage(`${after.name}はすでにこの種目へ登録されています`);
+      return;
+    }
+    const now = currentTime();
+    const next: MeetingState = {
+      ...state,
+      entries: state.entries.map((candidate) =>
+        candidate.id === entryId ? { ...candidate, athleteId } : candidate),
+      results: state.results.filter((result) => result.entryId !== entryId),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "出場者変更",
+        entity: selectedEvent.name,
+        before: before.name,
+        after: after.name,
+        reason: "個別変更",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "出場者変更", `${selectedEvent.name}: ${before.name}→${after.name}`);
+    setMessage(`${before.name}を${after.name}へ変更しました。旧選手の記録は削除しました`);
+  };
+
+  const removeEntry = async (entryId: string) => {
+    const entry = state.entries.find((candidate) => candidate.id === entryId)!;
+    const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
+    if (!window.confirm(`${athlete.name}を${selectedEvent.name}から削除しますか？`)) return;
+    const now = currentTime();
+    const next: MeetingState = {
+      ...state,
+      entries: state.entries.filter((candidate) => candidate.id !== entryId),
+      results: state.results.filter((result) => result.entryId !== entryId),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "出場者削除",
+        entity: selectedEvent.name,
+        before: athlete.name,
+        after: "削除",
+        reason: "個別変更",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "出場者削除", `${selectedEvent.name}: ${athlete.name}`);
+    setMessage(`${athlete.name}を${selectedEvent.name}から削除しました`);
+  };
+
+  const addEntry = async () => {
+    const heatId = newEntryHeatId || selectedHeats[0]?.id;
+    const athleteId = newEntryAthleteId || state.athletes[0]?.id;
+    const heat = state.heats.find((candidate) => candidate.id === heatId);
+    const athlete = state.athletes.find((candidate) => candidate.id === athleteId);
+    if (!heat || !athlete) {
+      setMessage("組と選手を選択してください");
+      return;
+    }
+    const suggestedLane = Math.max(
+      0,
+      ...state.entries.filter((entry) => entry.heatId === heat.id).map((entry) => entry.laneOrOrder),
+    ) + 1;
+    const laneOrOrder = Number(newEntryLane || suggestedLane);
+    if (!Number.isInteger(laneOrOrder) || laneOrOrder < 1) {
+      setMessage("レーン・試順は1以上の整数で入力してください");
+      return;
+    }
+    if (state.entries.some((entry) =>
+      entry.eventId === selectedEvent.id && entry.athleteId === athlete.id)) {
+      setMessage(`${athlete.name}はすでにこの種目へ登録されています`);
+      return;
+    }
+    if (state.entries.some((entry) => entry.heatId === heat.id && entry.laneOrOrder === laneOrOrder)) {
+      setMessage(`${heat.number}組のレーン・試順${laneOrOrder}は使用済みです`);
+      return;
+    }
+    const now = currentTime();
+    const entry: Entry = {
+      id: `entry-${crypto.randomUUID()}`,
+      eventId: selectedEvent.id,
+      heatId: heat.id,
+      athleteId: athlete.id,
+      laneOrOrder,
+      scoringEligible: true,
+    };
+    const next: MeetingState = {
+      ...state,
+      entries: [...state.entries, entry],
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "出場者追加",
+        entity: selectedEvent.name,
+        before: "未登録",
+        after: `${athlete.name} ${heat.number}組 ${laneOrOrder}`,
+        reason: "個別変更",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "出場者追加", `${selectedEvent.name}: ${athlete.name}`);
+    setNewEntryLane("");
+    setMessage(`${athlete.name}を${selectedEvent.name}へ追加しました`);
   };
 
   const headerTitle = view === "schedule"
@@ -625,21 +844,150 @@ export default function Home() {
             <div className="event-title">管理者画面</div>
             <div className="subseg admin-seg">
               {([
-                ["status", "状態管理"], ["athletes", "選手登録"], ["entries", "エントリー"], ["corrections", "記録修正"], ["audit", "監査ログ"],
+                ["status", "競技管理"], ["athletes", "選手登録"], ["entries", "エントリー編集"], ["corrections", "記録修正"], ["audit", "監査ログ"],
               ] as const).map(([key, label]) => <button key={key} className={adminMode === key ? "active" : ""} onClick={() => setAdminMode(key)}>{label}</button>)}
             </div>
           </div>
 
-          {adminMode === "status" && <div className="tablewrap"><table className="grid admin-grid"><thead><tr><th>開始</th><th>競技名</th><th>状態</th><th>変更</th></tr></thead><tbody>{state.events.map((event) => <tr key={event.id}><td>{event.startTime}</td><td className="event">{event.name}</td><td>{event.status}</td><td><select className="compact-select" aria-label={`${event.name}の状態`} value={event.status} onChange={(change) => changeEventStatus(event.id, change.target.value as EventStatus)}>{EVENT_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></td></tr>)}</tbody></table></div>}
+          {adminMode === "status" && <>
+            <div className="admin-note">種目名・開始時刻を入力して行ごとに保存できます。状態変更は選択時に即時反映されます。</div>
+            <div className="tablewrap">
+              <table className="grid admin-grid">
+                <thead><tr><th>開始時刻</th><th>種目名</th><th>状態</th><th>保存</th></tr></thead>
+                <tbody>{state.events.map((event) => (
+                  <tr key={event.id}>
+                    <td>
+                      <input
+                        className="admin-text-field time-field"
+                        type="time"
+                        aria-label={`${event.name}の開始時刻`}
+                        value={eventDrafts[event.id]?.startTime ?? event.startTime}
+                        onChange={(change) => setEventDrafts((current) => ({
+                          ...current,
+                          [event.id]: { ...current[event.id], startTime: change.target.value },
+                        }))}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="admin-text-field"
+                        aria-label={`${event.name}の種目名`}
+                        value={eventDrafts[event.id]?.name ?? event.name}
+                        onChange={(change) => setEventDrafts((current) => ({
+                          ...current,
+                          [event.id]: { ...current[event.id], name: change.target.value },
+                        }))}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        className="compact-select"
+                        aria-label={`${event.name}の状態`}
+                        value={event.status}
+                        onChange={(change) => changeEventStatus(event.id, change.target.value as EventStatus)}
+                      >
+                        {EVENT_STATUSES.map((status) => <option key={status}>{status}</option>)}
+                      </select>
+                    </td>
+                    <td><button className="row-save-button" onClick={() => saveEventDetails(event.id)}>保存</button></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </>}
 
           {adminMode === "athletes" && <>
-            <div className="admin-tools"><label className="goldbtn filebtn">選手CSV取込<input type="file" accept=".csv" onChange={importAthletes} /></label><span>登録済み {state.athletes.length}名</span></div>
+            <div className="admin-tools"><span>登録済み {state.athletes.length}名</span><span>CSV一括更新は「エントリー編集」から行えます。</span></div>
             <div className="tablewrap"><table className="grid athlete-master"><thead><tr><th>No</th><th>氏名</th><th>学年</th><th>性別</th><th>所属・登録先</th><th>実力帯</th></tr></thead><tbody>{state.athletes.map((athlete) => <tr key={athlete.id}><td>{athlete.bib}</td><td className="athlete"><div className="kana">{athlete.kana}</div>{athlete.name}</td><td>{athlete.grade}</td><td>{athlete.sex}</td><td>{state.teams.find((team) => team.id === athlete.teamId)?.name}<br />{athlete.affiliation}</td><td>{athlete.abilityBand}</td></tr>)}</tbody></table></div>
           </>}
 
           {adminMode === "entries" && <>
-            <div className="admin-tools"><select className="select" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "admin")}>{state.events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select><span>入力画面では選手マスタを変更できません</span></div>
-            <div className="tablewrap"><table className="grid entry-master"><thead><tr><th>組</th><th>ﾚｰﾝ</th><th>No</th><th>競技者名</th><th>得点対象</th></tr></thead><tbody>{eventEntries.map((entry) => { const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!; const heat = state.heats.find((candidate) => candidate.id === entry.heatId)!; return <tr key={entry.id}><td>{heat.number}</td><td>{entry.laneOrOrder}</td><td>{athlete.bib}</td><td className="event">{athlete.name}</td><td>{entry.scoringEligible ? "○" : "－"}</td></tr>; })}</tbody></table></div>
+            <div className="csv-workflow">
+              <div className="workflow-title">CSV一括取り込み</div>
+              <ol>
+                <li>現在の登録内容入りテンプレートをダウンロード</li>
+                <li>CSVの内容を編集して保存</li>
+                <li>編集済みCSVを取り込んでサイトへ反映</li>
+              </ol>
+              <div className="admin-tools csv-actions">
+                <button className="goldbtn" onClick={downloadBulkTemplate}>1. テンプレートをDL</button>
+                <label className="darkbtn filebtn">3. 編集済みCSVを取り込む
+                  <input type="file" accept=".csv,text/csv" onChange={importBulkCsv} />
+                </label>
+              </div>
+              <p>行を削除すると、その種目の該当出場枠も削除されます。種目名・開始時刻・選手情報・組・レーンを一括更新できます。</p>
+            </div>
+
+            <div className="admin-tools entry-event-selector">
+              <label htmlFor="entry-event">個別変更する種目</label>
+              <select id="entry-event" className="select" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "admin")}>
+                {state.events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+              </select>
+              <span>選手を変更すると、その枠に保存済みの記録は削除されます。</span>
+            </div>
+            <div className="tablewrap">
+              <table className="grid entry-master">
+                <thead><tr><th>組</th><th>ﾚｰﾝ<br />試順</th><th>出場者</th><th>得点</th><th>操作</th></tr></thead>
+                <tbody>
+                  {eventEntries.length === 0 && <tr><td colSpan={5} className="empty">出場者は登録されていません</td></tr>}
+                  {eventEntries.map((entry) => {
+                    const heat = state.heats.find((candidate) => candidate.id === entry.heatId)!;
+                    return (
+                      <tr key={entry.id}>
+                        <td>{heat.number}</td>
+                        <td>{entry.laneOrOrder}</td>
+                        <td>
+                          <select
+                            className="compact-select athlete-select"
+                            aria-label={`${selectedEvent.name} ${heat.number}組 ${entry.laneOrOrder}の出場者`}
+                            value={entry.athleteId}
+                            onChange={(change) => changeEntryAthlete(entry.id, change.target.value)}
+                          >
+                            {state.athletes.map((athlete) => (
+                              <option key={athlete.id} value={athlete.id}>No.{athlete.bib} {athlete.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>{entry.scoringEligible ? "○" : "－"}</td>
+                        <td><button className="danger-button" onClick={() => removeEntry(entry.id)}>削除</button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="entry-add">
+              <div className="workflow-title">出場者を個別追加</div>
+              <label>組
+                <select
+                  className="compact-select"
+                  value={newEntryHeatId || selectedHeats[0]?.id || ""}
+                  onChange={(event) => setNewEntryHeatId(event.target.value)}
+                >
+                  {selectedHeats.map((heat) => <option key={heat.id} value={heat.id}>{heat.number}組</option>)}
+                </select>
+              </label>
+              <label>レーン・試順
+                <input
+                  className="admin-text-field"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="自動"
+                  value={newEntryLane}
+                  onChange={(event) => setNewEntryLane(event.target.value.replace(/\D/g, ""))}
+                />
+              </label>
+              <label>選手
+                <select
+                  className="compact-select"
+                  value={newEntryAthleteId || state.athletes[0]?.id || ""}
+                  onChange={(event) => setNewEntryAthleteId(event.target.value)}
+                >
+                  {state.athletes.map((athlete) => <option key={athlete.id} value={athlete.id}>No.{athlete.bib} {athlete.name}</option>)}
+                </select>
+              </label>
+              <button className="darkbtn" onClick={addEntry}>出場者を追加</button>
+            </div>
           </>}
 
           {adminMode === "corrections" && <>

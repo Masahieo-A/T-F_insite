@@ -245,7 +245,7 @@ const fieldValues: Record<string, number[]> = {
   shot: [11.5, 10.92, 10.44, 9.98, 9.42, 8.86, 8.31, 7.95, 7.54],
 };
 
-export const results: Result[] = entries.flatMap((entry, index) => {
+export const results: Result[] = entries.flatMap((entry) => {
   const eventEntries = entries.filter((candidate) => candidate.eventId === entry.eventId);
   const position = eventEntries.findIndex((candidate) => candidate.id === entry.id);
   const values = trackValues[entry.eventId] || fieldValues[entry.eventId];

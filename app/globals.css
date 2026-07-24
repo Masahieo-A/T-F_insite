@@ -315,6 +315,77 @@ button:disabled { cursor: not-allowed; }
 }
 .filebtn { display: inline-block; cursor: pointer; }
 .filebtn input { display: none; }
+.admin-note {
+  padding: 0 14px 12px;
+  font-size: 15px;
+}
+.admin-text-field {
+  width: 100%;
+  min-height: 38px;
+  border: 2px solid #333;
+  border-radius: 0;
+  padding: 5px;
+  background: #fff;
+  color: #111;
+}
+.time-field { min-width: 0; padding-left: 2px; padding-right: 2px; }
+.row-save-button,
+.danger-button {
+  width: 100%;
+  min-height: 38px;
+  border: 2px solid #111;
+  border-radius: 0;
+  background: #222;
+  color: #fff;
+  padding: 4px;
+}
+.danger-button {
+  background: #fff;
+  color: #9a1f1f;
+  border-color: #9a1f1f;
+}
+.csv-workflow {
+  margin: 0 14px 18px;
+  padding: 12px;
+  border: 2px solid var(--line);
+  background: var(--stripe);
+}
+.workflow-title {
+  font-size: 19px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.csv-workflow ol {
+  margin: 5px 0 10px;
+  padding-left: 26px;
+}
+.csv-workflow li { margin: 3px 0; }
+.csv-workflow p {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+.csv-actions { padding: 0; }
+.entry-event-selector {
+  padding-top: 4px;
+  border-top: 4px solid var(--blue);
+}
+.entry-event-selector label { font-weight: 700; }
+.athlete-select { text-align: left; }
+.entry-add {
+  margin: 0 14px 24px;
+  padding: 12px;
+  border: 2px solid var(--line);
+  display: grid;
+  grid-template-columns: .65fr .9fr 2fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.entry-add .workflow-title { grid-column: 1 / -1; }
+.entry-add label {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
 .compact-select {
   width: 100%;
   min-height: 38px;
@@ -331,20 +402,21 @@ button:disabled { cursor: not-allowed; }
   border-radius: 0;
   padding: 8px;
 }
-.admin-grid th:nth-child(1) { width: 14%; }
-.admin-grid th:nth-child(2) { width: 38%; }
-.admin-grid th:nth-child(3) { width: 18%; }
-.admin-grid th:nth-child(4) { width: 30%; }
+.admin-grid th:nth-child(1) { width: 19%; }
+.admin-grid th:nth-child(2) { width: 39%; }
+.admin-grid th:nth-child(3) { width: 24%; }
+.admin-grid th:nth-child(4) { width: 18%; }
 .athlete-master th:nth-child(1) { width: 11%; }
 .athlete-master th:nth-child(2) { width: 31%; }
 .athlete-master th:nth-child(3) { width: 10%; }
 .athlete-master th:nth-child(4) { width: 12%; }
 .athlete-master th:nth-child(5) { width: 24%; }
 .athlete-master th:nth-child(6) { width: 12%; }
-.entry-master th:nth-child(1), .entry-master th:nth-child(2) { width: 12%; }
-.entry-master th:nth-child(3) { width: 16%; }
-.entry-master th:nth-child(4) { width: 42%; }
-.entry-master th:nth-child(5) { width: 18%; }
+.entry-master th:nth-child(1) { width: 10%; }
+.entry-master th:nth-child(2) { width: 13%; }
+.entry-master th:nth-child(3) { width: 51%; }
+.entry-master th:nth-child(4) { width: 10%; }
+.entry-master th:nth-child(5) { width: 16%; }
 .correction-grid th:nth-child(1) { width: 12%; }
 .correction-grid th:nth-child(2) { width: 29%; }
 .correction-grid th:nth-child(3) { width: 18%; }
@@ -426,6 +498,20 @@ button:disabled { cursor: not-allowed; }
   .input-actions { padding-bottom: 18px; }
   .admin-seg button { font-size: 13px; padding: 9px 11px; }
   .admin-tools { padding: 0 10px 14px; gap: 8px; }
+  .admin-note { padding: 0 10px 10px; font-size: 13px; }
+  .admin-text-field, .row-save-button, .danger-button { min-height: 34px; font-size: 12px; }
+  .csv-workflow { margin: 0 5px 14px; padding: 9px; }
+  .workflow-title { font-size: 16px; }
+  .csv-workflow p { font-size: 12px; }
+  .entry-add {
+    margin: 0 5px 18px;
+    padding: 9px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .entry-add label:nth-of-type(3),
+  .entry-add .darkbtn { grid-column: 1 / -1; }
+  .entry-master { font-size: 12px; }
+  .entry-master .compact-select { font-size: 11px; }
   .reason-field { min-width: 170px; min-height: 42px; font-size: 14px; }
   .compact-select { min-height: 34px; font-size: 12px; }
   .athlete-master, .audit-grid { font-size: 13px; }
