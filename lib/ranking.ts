@@ -16,6 +16,19 @@ export type RankedResult = {
   rank: number | null;
 };
 
+export type AthleteEventScore = {
+  eventId: string;
+  entryId: string;
+  athleteId: string;
+  athleteName: string;
+  teamId: string;
+  rank: number | null;
+  basePoints: number;
+  pbPoints: number;
+  totalPoints: number;
+  status: Result["status"];
+};
+
 export function sanitizeNumericInput(raw: string): string {
   const cleaned = raw.replace(/[^\d.:]/g, "");
   const colonParts = cleaned.split(":").slice(0, 2);
@@ -136,64 +149,180 @@ export function rankResultsByAbilityBand(
   });
 }
 
+function sharedPlacePoints(rank: number, tiedCount: number, points: number[]) {
+  let total = 0;
+  for (let index = rank - 1; index < rank - 1 + tiedCount; index += 1) {
+    total += points[index] ?? 0;
+  }
+  return Math.round((total / tiedCount) * 10) / 10;
+}
+
+export function calculateAthleteEventScores(
+  event: Event,
+  ranked: RankedResult[],
+  rule: ScoreRule,
+): AthleteEventScore[] {
+  const eligible = ranked.filter((item) => item.entry.scoringEligible);
+  let previousValue: number | null = null;
+  let currentRank = 0;
+  const scoringRanked = eligible.map((item, index) => {
+    if (item.rank === null) return { ...item, rank: null };
+    if (previousValue === null || !isSamePerformance(previousValue, item.result.value!)) {
+      currentRank = index + 1;
+    }
+    previousValue = item.result.value;
+    return { ...item, rank: currentRank };
+  });
+  const rows: AthleteEventScore[] = eligible.map((item) => ({
+    eventId: event.id,
+    entryId: item.entry.id,
+    athleteId: item.athlete.id,
+    athleteName: item.athlete.name,
+    teamId: item.athlete.teamId,
+    rank: null,
+    basePoints: 0,
+    pbPoints: 0,
+    totalPoints: 0,
+    status: item.result.status,
+  }));
+
+  const valid = scoringRanked.filter((item) => item.rank !== null);
+  const points = event.id === "relay" ? [18, 12, 6] : rule.eventPoints;
+  for (const item of valid) {
+    const tiedCount = valid.filter((candidate) => candidate.rank === item.rank).length;
+    const row = rows.find((candidate) => candidate.entryId === item.entry.id)!;
+    row.rank = item.rank;
+    row.basePoints = sharedPlacePoints(item.rank!, tiedCount, points);
+  }
+
+  if (event.id === "relay") {
+    rows.forEach((row) => {
+      row.totalPoints = row.basePoints;
+    });
+    return rows;
+  }
+
+  for (const teamId of new Set(rows.map((row) => row.teamId))) {
+    const pbCandidates = scoringRanked.filter((item) =>
+      item.athlete.teamId === teamId
+      && item.result.isPersonalBest
+      && item.rank !== null,
+    );
+    pbCandidates.slice(0, 2).forEach((item) => {
+      const row = rows.find((candidate) => candidate.entryId === item.entry.id)!;
+      row.pbPoints = rule.pbBonus;
+    });
+  }
+
+  rows.forEach((row) => {
+    row.totalPoints = Math.round((row.basePoints + row.pbPoints) * 10) / 10;
+  });
+  return rows;
+}
+
 export function calculateEventScoreTransactions(
   event: Event,
   ranked: RankedResult[],
   teams: Team[],
   rule: ScoreRule,
 ): ScoreTransaction[] {
-  const validCount = ranked.filter((item) => item.rank !== null).length;
-  const teamRows = teams.map((team) => {
-    const members = ranked
-      .filter((item) => item.athlete.teamId === team.id && item.entry.scoringEligible)
-      .slice(0, event.scoringSlots);
-    const ranks = members.map((item) => item.rank ?? validCount + 1);
-    while (ranks.length < event.scoringSlots) ranks.push(validCount + 1);
-    return { team, rankSum: ranks.reduce((sum, rank) => sum + rank, 0), bestRanks: ranks };
-  }).sort((a, b) => a.rankSum - b.rankSum || a.bestRanks.join(",").localeCompare(b.bestRanks.join(",")));
-
-  const transactions: ScoreTransaction[] = teamRows.map((row, index) => ({
-    id: `${event.id}-${row.team.id}-event`,
-    eventId: event.id,
-    teamId: row.team.id,
-    points: rule.eventPoints[index] ?? 0,
-    reason: "event-rank",
-    note: `種目内${index + 1}位（順位合計${row.rankSum}）`,
-  }));
-
-  ranked.filter((item) => item.result.isPersonalBest && item.rank !== null).forEach((item) => {
-    transactions.push({
-      id: `${event.id}-${item.entry.id}-pb`,
+  const teamIds = new Set(teams.map((team) => team.id));
+  const scores = calculateAthleteEventScores(event, ranked, rule)
+    .filter((score) => teamIds.has(score.teamId));
+  return scores.flatMap((score): ScoreTransaction[] => {
+    const rankLabel = event.id === "relay" ? "リレー" : "全体";
+    const base = score.basePoints > 0 ? [{
+      id: `${event.id}-${score.entryId}-event`,
       eventId: event.id,
-      teamId: item.athlete.teamId,
-      points: rule.pbBonus,
-      reason: "pb-bonus",
-      note: `${item.athlete.name} PB`,
-    });
+      teamId: score.teamId,
+      points: score.basePoints,
+      reason: "event-rank" as const,
+      note: `${rankLabel}${score.rank}位 ${score.athleteName}`,
+    }] : [];
+    const pb = score.pbPoints > 0 ? [{
+      id: `${event.id}-${score.entryId}-pb`,
+      eventId: event.id,
+      teamId: score.teamId,
+      points: score.pbPoints,
+      reason: "pb-bonus" as const,
+      note: `${score.athleteName} PB`,
+    }] : [];
+    return [...base, ...pb];
   });
-
-  return transactions;
 }
 
 export function calculateOverallStandings(
   teams: Team[],
   transactions: ScoreTransaction[],
-): Array<Team & { points: number; wins: number; seconds: number; rank: number }> {
+): Array<Team & {
+  points: number;
+  basePoints: number;
+  pbPoints: number;
+  eventWins: number;
+  bandWins: number;
+  relayRank: number;
+  wins: number;
+  seconds: number;
+  rank: number;
+}> {
+  const eventIds = [...new Set(transactions.map((transaction) => transaction.eventId))];
   const rows = teams.map((team) => {
     const own = transactions.filter((transaction) => transaction.teamId === team.id);
+    const basePoints = own
+      .filter((transaction) => transaction.reason !== "pb-bonus")
+      .reduce((sum, transaction) => sum + transaction.points, 0);
+    const pbPoints = own
+      .filter((transaction) => transaction.reason === "pb-bonus")
+      .reduce((sum, transaction) => sum + transaction.points, 0);
+    const eventWins = eventIds.filter((eventId) => {
+      const teamTotals = teams.map((candidate) => transactions
+        .filter((transaction) =>
+          transaction.eventId === eventId
+          && transaction.teamId === candidate.id
+          && transaction.reason !== "pb-bonus")
+        .reduce((sum, transaction) => sum + transaction.points, 0));
+      const ownTotal = transactions
+        .filter((transaction) =>
+          transaction.eventId === eventId
+          && transaction.teamId === team.id
+          && transaction.reason !== "pb-bonus")
+        .reduce((sum, transaction) => sum + transaction.points, 0);
+      return ownTotal > 0 && ownTotal === Math.max(...teamTotals);
+    }).length;
+    const individualWins = own.filter((transaction) =>
+      transaction.reason === "event-rank" && /全体1位/.test(transaction.note)).length;
+    const relayNote = own.find((transaction) =>
+      transaction.eventId === "relay" && transaction.reason === "event-rank")?.note ?? "";
+    const relayRank = Number(relayNote.match(/リレー(\d+)位/)?.[1] ?? 99);
     return {
       ...team,
-      points: own.reduce((sum, transaction) => sum + transaction.points, 0),
-      wins: own.filter((transaction) => transaction.reason === "event-rank" && transaction.points === 6).length,
-      seconds: own.filter((transaction) => transaction.reason === "event-rank" && transaction.points === 4).length,
+      points: Math.round((basePoints + pbPoints) * 10) / 10,
+      basePoints: Math.round(basePoints * 10) / 10,
+      pbPoints: Math.round(pbPoints * 10) / 10,
+      eventWins,
+      bandWins: individualWins,
+      relayRank,
+      wins: eventWins,
+      seconds: individualWins,
       rank: 0,
     };
-  }).sort((a, b) => b.points - a.points || b.wins - a.wins || b.seconds - a.seconds || a.displayOrder - b.displayOrder);
+  }).sort((a, b) =>
+    b.points - a.points
+    || b.basePoints - a.basePoints
+    || b.eventWins - a.eventWins
+    || b.bandWins - a.bandWins
+    || a.relayRank - b.relayRank
+    || a.displayOrder - b.displayOrder);
 
   let prior: (typeof rows)[number] | null = null;
   let rank = 0;
   return rows.map((row, index) => {
-    if (!prior || row.points !== prior.points || row.wins !== prior.wins || row.seconds !== prior.seconds) rank = index + 1;
+    if (!prior
+      || row.points !== prior.points
+      || row.basePoints !== prior.basePoints
+      || row.eventWins !== prior.eventWins
+      || row.bandWins !== prior.bandWins
+      || row.relayRank !== prior.relayRank) rank = index + 1;
     prior = row;
     return { ...row, rank };
   });

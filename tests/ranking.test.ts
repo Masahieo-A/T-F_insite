@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { athletes, events, scoreRules, teams, type Entry, type Result } from "../lib/domain.ts";
 import {
+  calculateAthleteEventScores,
   calculateEventScoreTransactions,
   calculateOverallStandings,
   formatPerformance,
@@ -100,15 +101,106 @@ test("実力帯別順位を独立して再採番する", () => {
   assert.ok(bandA.every((item) => item.athlete.abilityBand === "A"));
 });
 
-test("種目順位点とPBボーナスから得点取引を作る", () => {
-  const ranked = rankResults(results, entries, athletes, sprint);
+test("実力帯を使わず全体順位から6・4・2点を付ける", () => {
+  const scoringAthletes = athletes.slice(0, 4).map((athlete, index) => ({
+    ...athlete,
+    id: `score-athlete-${index}`,
+    teamId: teams[index % 3].id,
+  }));
+  const scoringEntries: Entry[] = scoringAthletes.map((athlete, index) => ({
+    id: `score-entry-${index}`,
+    eventId: sprint.id,
+    heatId: "80m-heat-1",
+    athleteId: athlete.id,
+    laneOrOrder: index + 1,
+    scoringEligible: true,
+  }));
+  const scoringResults: Result[] = scoringEntries.map((entry, index) => ({
+    id: `score-result-${index}`,
+    entryId: entry.id,
+    value: [10, 10.2, 10.4, 10.8][index],
+    displayValue: "",
+    status: "OK",
+    provisional: true,
+    isPersonalBest: index === 0,
+  }));
+  const ranked = rankResults(scoringResults, scoringEntries, scoringAthletes, sprint);
+  const scores = calculateAthleteEventScores(sprint, ranked, scoreRules[0]);
+  assert.deepEqual(scores.map((score) => score.basePoints), [6, 4, 2, 0]);
+  assert.deepEqual(scores.map((score) => score.rank), [1, 2, 3, 4]);
+
   const transactions = calculateEventScoreTransactions(sprint, ranked, teams, scoreRules[0]);
-  const eventPoints = transactions.filter((transaction) => transaction.reason === "event-rank");
-  assert.deepEqual(eventPoints.map((transaction) => transaction.points), [6, 4, 2]);
+  assert.deepEqual(
+    transactions.filter((transaction) => transaction.reason === "event-rank").map((transaction) => transaction.points),
+    [6, 4, 2],
+  );
   assert.ok(transactions.some((transaction) => transaction.reason === "pb-bonus"));
 });
 
-test("総合同点は1位数・2位数で判定し、完全同点は同順位にする", () => {
+test("同着は該当順位点を平均し、無効記録は0点にする", () => {
+  const tieAthletes = athletes.slice(0, 4).map((athlete, index) => ({
+    ...athlete,
+    id: `tie-athlete-${index}`,
+    teamId: teams[index % 3].id,
+  }));
+  const tieEntries: Entry[] = tieAthletes.map((athlete, index) => ({
+    id: `tie-entry-${index}`,
+    eventId: sprint.id,
+    heatId: "80m-heat-1",
+    athleteId: athlete.id,
+    laneOrOrder: index + 1,
+    scoringEligible: true,
+  }));
+  const tieResults: Result[] = tieEntries.map((entry, index) => ({
+    id: `tie-result-${index}`,
+    entryId: entry.id,
+    value: index === 3 ? null : [10, 10, 10.4][index],
+    displayValue: "",
+    status: index === 3 ? "DNS" : "OK",
+    provisional: true,
+    isPersonalBest: false,
+  }));
+  const scores = calculateAthleteEventScores(
+    sprint,
+    rankResults(tieResults, tieEntries, tieAthletes, sprint),
+    scoreRules[0],
+  );
+  assert.deepEqual(scores.map((score) => score.basePoints), [5, 5, 2, 0]);
+  assert.equal(scores[3].rank, null);
+});
+
+test("PBボーナスは1チーム・1種目につき2点を上限にする", () => {
+  const pbAthletes = athletes.slice(0, 3).map((athlete, index) => ({
+    ...athlete,
+    id: `pb-athlete-${index}`,
+    teamId: "A",
+  }));
+  const pbEntries: Entry[] = pbAthletes.map((athlete, index) => ({
+    id: `pb-entry-${index}`,
+    eventId: sprint.id,
+    heatId: "80m-heat-1",
+    athleteId: athlete.id,
+    laneOrOrder: index + 1,
+    scoringEligible: true,
+  }));
+  const pbResults: Result[] = pbEntries.map((entry, index) => ({
+    id: `pb-result-${index}`,
+    entryId: entry.id,
+    value: 10 + index,
+    displayValue: "",
+    status: "OK",
+    provisional: true,
+    isPersonalBest: true,
+  }));
+  const scores = calculateAthleteEventScores(
+    sprint,
+    rankResults(pbResults, pbEntries, pbAthletes, sprint),
+    scoreRules[0],
+  );
+  assert.equal(scores.reduce((sum, score) => sum + score.pbPoints, 0), 2);
+});
+
+test("総合同点は基本点・種目勝利・個人1位数の順で判定し、完全同点は同順位にする", () => {
   const tied = calculateOverallStandings(teams, [
     { id: "r1", eventId: "e1", teamId: "A", points: 6, reason: "event-rank", note: "" },
     { id: "b1", eventId: "e1", teamId: "B", points: 6, reason: "event-rank", note: "" },

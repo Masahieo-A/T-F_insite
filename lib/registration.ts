@@ -40,7 +40,8 @@ export function applyAthleteCsv(state: MeetingState, text: string) {
     if (!["男子", "女子"].includes(row["性別"])) throw new Error(`${line}行目: 性別は男子または女子です`);
     if (!Number.isInteger(grade) || grade < 1 || grade > 6) throw new Error(`${line}行目: 学年が不正です`);
     if (!state.teams.some((team) => team.id === row["チームID"])) throw new Error(`${line}行目: チームIDが不正です`);
-    if (!["A", "B", "C"].includes(row["実力帯"])) throw new Error(`${line}行目: 実力帯はA・B・Cです`);
+    const abilityBand = row["実力帯"] || "C";
+    if (!["A", "B", "C"].includes(abilityBand)) throw new Error(`${line}行目: 実力帯はA・B・Cです`);
     seen.add(bib);
     const existing = existingByBib.get(bib);
     return {
@@ -53,7 +54,7 @@ export function applyAthleteCsv(state: MeetingState, text: string) {
       teamId: row["チームID"],
       affiliation: row["所属"],
       region: row["地域"],
-      abilityBand: row["実力帯"] as AbilityBand,
+      abilityBand: abilityBand as AbilityBand,
       personalBests: existing?.personalBests ?? {},
     };
   });

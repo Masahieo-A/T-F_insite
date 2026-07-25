@@ -11,12 +11,12 @@ import {
   type ResultStatus,
 } from "@/lib/domain";
 import {
+  calculateAthleteEventScores,
   calculateEventScoreTransactions,
   calculateOverallStandings,
   formatPerformance,
   normalizePerformance,
   rankResults,
-  rankResultsByAbilityBand,
   sanitizeNumericInput,
   type RankedResult,
 } from "@/lib/ranking";
@@ -29,7 +29,7 @@ import {
 } from "@/lib/registration";
 
 type View = "schedule" | "results" | "team" | "input" | "selfEntry" | "registration" | "admin";
-type ResultMode = "heats" | "overall" | "band";
+type ResultMode = "heats" | "overall";
 type AdminMode = "status" | "athletes" | "entries" | "corrections" | "audit";
 type RegistrationMode = "athletes" | "events" | "assignments";
 type Discipline = "トラック" | "跳躍" | "投てき";
@@ -165,7 +165,6 @@ export default function Home() {
   const [selectedHeatId, setSelectedHeatId] = useState("80m-heat-1");
   const [resultOrder, setResultOrder] = useState<"lane" | "rank">("rank");
   const [resultMode, setResultMode] = useState<ResultMode>("heats");
-  const [abilityBand, setAbilityBand] = useState<"A" | "B" | "C">("A");
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
   const [inputCodes, setInputCodes] = useState<Record<string, ResultStatus>>({});
   const [reviewing, setReviewing] = useState(false);
@@ -233,6 +232,14 @@ export default function Home() {
     () => calculateOverallStandings(state.teams, transactions),
     [state.teams, transactions],
   );
+  const hasTeamScores = transactions.length > 0;
+  const athleteScores = useMemo(() => state.events
+    .filter((event) => ["速報", "確定"].includes(event.status))
+    .flatMap((event) => calculateAthleteEventScores(
+      event,
+      rankResults(state.results, state.entries, state.athletes, event),
+      state.scoreRules[0],
+    )), [state]);
 
   const visibleSchedule = state.heats.filter((heat) => {
     const event = state.events.find((candidate) => candidate.id === heat.eventId)!;
@@ -875,7 +882,7 @@ export default function Home() {
     : view === "results"
       ? "結果一覧（2026/08/03）"
       : view === "team"
-        ? "対抗戦集計（2026/08/03）"
+        ? "総合順位（2026/08/03）"
         : view === "input"
           ? "記録入力（2026/08/03）"
           : view === "selfEntry"
@@ -943,11 +950,21 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <div className="darktabs">
-              <button onClick={() => openEvent("80m")}>タイムレース集計</button>
-              <button className="muted" disabled>混成集計</button>
-              <button onClick={() => setView("team")}>対抗戦集計</button>
-              <button>コンディション</button>
+            <div className="overall-summary">
+              <div className="summary-heading">総合順位 <span>{hasTeamScores ? "速報・確定済み種目から自動計算" : "結果入力後に自動計算"}</span></div>
+              <table className="grid summary-grid">
+                <thead><tr><th>順位</th><th>チーム</th><th>基本点</th><th>PB</th><th>合計</th></tr></thead>
+                <tbody>{standings.map((team) => (
+                  <tr key={team.id} className={hasTeamScores && team.rank === 1 ? "leader-row" : ""}>
+                    <td>{hasTeamScores ? `${team.rank}位` : "-"}</td>
+                    <td className="event">{team.name}{hasTeamScores && team.rank === 1 && <span className="leader-label"> 暫定1位</span>}</td>
+                    <td>{team.basePoints}</td>
+                    <td>{team.pbPoints}</td>
+                    <td className="scorecol">{team.points}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              <div className="summary-link"><a href="#" onClick={(event) => { event.preventDefault(); setView("team"); window.scrollTo(0, 0); }}>選手別・種目別の得点を見る</a></div>
             </div>
           </div>
           <div className="tablewrap schedule-wrap">
@@ -994,15 +1011,7 @@ export default function Home() {
               <a href="#" onClick={(event) => { event.preventDefault(); setResultMode(resultMode === "overall" ? "heats" : "overall"); }}>
                 {resultMode === "overall" ? "組別結果へ戻る" : "集計結果（集計済）"}
               </a>
-              <a href="#" onClick={(event) => { event.preventDefault(); setResultMode("band"); }}>実力帯別</a>
             </div>
-            {resultMode === "band" && (
-              <div className="subseg bandseg">
-                {(["A", "B", "C"] as const).map((band) => (
-                  <button key={band} className={abilityBand === band ? "active" : ""} onClick={() => setAbilityBand(band)}>{band}帯</button>
-                ))}
-              </div>
-            )}
           </div>
 
           {resultMode === "heats" && selectedHeats.map((heat) => {
@@ -1037,20 +1046,6 @@ export default function Home() {
             </div>
           )}
 
-          {resultMode === "band" && (
-            <div className="heat-block">
-              <div className="heat-title">実力帯 {abilityBand}　全体順位</div>
-              <div className="tablewrap">
-                <table className="grid result-grid">
-                  <thead><tr><th>順位</th><th>No</th><th>競技者名</th><th>所属<br />所属地</th><th>記録</th></tr></thead>
-                  <tbody>
-                    {rankResultsByAbilityBand(rankResults(state.results, eventEntries, state.athletes, selectedEvent), abilityBand)
-                      .map((item) => renderResultRow(item, selectedEvent, true))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
           <div className="note">DNF:途中棄権、DNS:欠場、DQ:失格、NM:記録なし</div>
         </section>
       )}
@@ -1058,17 +1053,37 @@ export default function Home() {
       {view === "team" && (
         <section>
           <div className="result-head">
-            <div className="event-title">チーム総合得点　<span className="provisional-text">暫定</span></div>
+            <div className="event-title">総合順位　<span className="provisional-text">{hasTeamScores ? "暫定" : "集計前"}</span></div>
             <div className="history"><a href="#" onClick={(event) => event.preventDefault()}>得点内訳（自動計算）</a></div>
           </div>
           <div className="heat-title">総合順位　最終更新 {state.updatedAt}</div>
           <div className="tablewrap">
             <table className="grid team-grid">
-              <thead><tr><th>順位</th><th>所属</th><th>得点</th><th>1位数</th><th>2位数</th></tr></thead>
-              <tbody>{standings.map((team) => <tr key={team.id}><td>{team.rank}</td><td className="event">{team.name}</td><td className="scorecol">{team.points}</td><td>{team.wins}</td><td>{team.seconds}</td></tr>)}</tbody>
+              <thead><tr><th>順位</th><th>チーム</th><th>基本点</th><th>PB</th><th>合計</th></tr></thead>
+              <tbody>{standings.map((team) => <tr key={team.id} className={hasTeamScores && team.rank === 1 ? "leader-row" : ""}><td>{hasTeamScores ? team.rank : "-"}</td><td className="event">{team.name}</td><td>{team.basePoints}</td><td>{team.pbPoints}</td><td className="scorecol">{team.points}</td></tr>)}</tbody>
             </table>
           </div>
-          <div className="heat-title">種目別得点内訳</div>
+          <div className="heat-title">選手別・種目別得点</div>
+          <div className="tablewrap">
+            <table className="grid athlete-score-grid">
+              <thead><tr><th>競技</th><th>選手</th><th>チーム</th><th>個人順位</th><th>基本</th><th>PB</th><th>計</th></tr></thead>
+              <tbody>
+                {athleteScores.length === 0 && <tr><td colSpan={7} className="empty">速報・確定済みの得点はまだありません</td></tr>}
+                {athleteScores.map((score) => {
+                  const event = state.events.find((candidate) => candidate.id === score.eventId)!;
+                  const team = state.teams.find((candidate) => candidate.id === score.teamId)!;
+                  return <tr key={score.entryId} className={score.rank === null ? "dns" : ""}>
+                    <td className="event">{event.name}</td>
+                    <td className="event">{score.athleteName}</td>
+                    <td>{team.shortName}</td>
+                    <td>{score.rank === null ? score.status : `${score.rank}位`}</td>
+                    <td>{score.basePoints}</td><td>{score.pbPoints}</td><td className="scorecol">{score.totalPoints}</td>
+                  </tr>;
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="heat-title">得点計算明細</div>
           <div className="tablewrap">
             <table className="grid transaction-grid">
               <thead><tr><th>競技</th><th>所属</th><th>内容</th><th>得点</th></tr></thead>
@@ -1297,7 +1312,7 @@ export default function Home() {
                   <input type="file" accept=".csv,text/csv" onChange={importAthleteCsv} />
                 </label>
               </div>
-              <p>必須列は選手No・氏名・性別・学年・チームID・実力帯です。CSVから削除した選手はエントリーからも外れます。</p>
+              <p>必須列は選手No・氏名・性別・学年・チームIDです。実力帯列は旧データ互換用で、空欄でも取り込めます。</p>
             </div>
             <div className="athlete-add">
               <div className="workflow-title">競技者を個別追加</div>
@@ -1437,7 +1452,7 @@ export default function Home() {
 
           {adminMode === "athletes" && <>
             <div className="admin-tools"><span>登録済み {state.athletes.length}名</span><span>CSV一括更新は「エントリー編集」から行えます。</span></div>
-            <div className="tablewrap"><table className="grid athlete-master"><thead><tr><th>No</th><th>氏名</th><th>学年</th><th>性別</th><th>所属・登録先</th><th>実力帯</th></tr></thead><tbody>{state.athletes.map((athlete) => <tr key={athlete.id}><td>{athlete.bib}</td><td className="athlete"><div className="kana">{athlete.kana}</div>{athlete.name}</td><td>{athlete.grade}</td><td>{athlete.sex}</td><td>{state.teams.find((team) => team.id === athlete.teamId)?.name}<br />{athlete.affiliation}</td><td>{athlete.abilityBand}</td></tr>)}</tbody></table></div>
+            <div className="tablewrap"><table className="grid athlete-master"><thead><tr><th>No</th><th>氏名</th><th>学年</th><th>性別</th><th>所属・登録先</th></tr></thead><tbody>{state.athletes.map((athlete) => <tr key={athlete.id}><td>{athlete.bib}</td><td className="athlete"><div className="kana">{athlete.kana}</div>{athlete.name}</td><td>{athlete.grade}</td><td>{athlete.sex}</td><td>{state.teams.find((team) => team.id === athlete.teamId)?.name}<br />{athlete.affiliation}</td></tr>)}</tbody></table></div>
           </>}
 
           {adminMode === "entries" && <>

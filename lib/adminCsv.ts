@@ -175,7 +175,8 @@ export function applyBulkCsv(state: MeetingState, text: string): BulkCsvImportRe
     if (!state.teams.some((team) => team.id === row["チームID"])) {
       throw new Error(`${rowNumber}行目: チームID「${row["チームID"]}」が見つかりません`);
     }
-    if (!["A", "B", "C"].includes(row["実力帯"])) throw new Error(`${rowNumber}行目: 実力帯はA・B・Cのいずれかです`);
+    const abilityBand = row["実力帯"] || "C";
+    if (!["A", "B", "C"].includes(abilityBand)) throw new Error(`${rowNumber}行目: 実力帯はA・B・Cのいずれかです`);
 
     const existingAthlete = athleteByBib.get(bib);
     const athlete: Athlete = {
@@ -188,7 +189,7 @@ export function applyBulkCsv(state: MeetingState, text: string): BulkCsvImportRe
       teamId: row["チームID"],
       affiliation: row["所属"],
       region: row["地域"],
-      abilityBand: row["実力帯"] as AbilityBand,
+      abilityBand: abilityBand as AbilityBand,
       personalBests: existingAthlete?.personalBests ?? {},
     };
     nextAthletesByBib.set(bib, athlete);

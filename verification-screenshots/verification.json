@@ -1,0 +1,49 @@
+{
+  "viewportResults": [
+    {
+      "documentScrollWidth": 390,
+      "hasOverall": true,
+      "oldButtons": [],
+      "scheduleRowCount": 17,
+      "tableInternalOverflow": false,
+      "viewport": "390x844"
+    },
+    {
+      "documentScrollWidth": 393,
+      "hasOverall": true,
+      "oldButtons": [],
+      "scheduleRowCount": 17,
+      "tableInternalOverflow": false,
+      "viewport": "393x852"
+    },
+    {
+      "documentScrollWidth": 430,
+      "hasOverall": true,
+      "oldButtons": [],
+      "scheduleRowCount": 17,
+      "tableInternalOverflow": false,
+      "viewport": "430x932"
+    },
+    {
+      "documentScrollWidth": 768,
+      "hasOverall": true,
+      "oldButtons": [],
+      "scheduleRowCount": 17,
+      "tableInternalOverflow": false,
+      "viewport": "768x1024"
+    },
+    {
+      "documentScrollWidth": 1440,
+      "hasOverall": true,
+      "oldButtons": [],
+      "scheduleRowCount": 17,
+      "tableInternalOverflow": false,
+      "viewport": "1440x900"
+    }
+  ],
+  "detailInfo": {
+    "hasAthleteScores": true,
+    "hasTeamGrid": true,
+    "oldTitle": false
+  }
+}
