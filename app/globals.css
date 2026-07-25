@@ -147,14 +147,6 @@ button:disabled { cursor: not-allowed; }
   font-weight: 700;
   font-size: 16px;
 }
-.program-title {
-  padding: 4px 12px 7px;
-  font-size: 20px;
-  font-weight: 700;
-}
-.day-program th:nth-child(1) { width: 23%; }
-.day-program th:nth-child(2) { width: 34%; }
-.day-program th:nth-child(3) { width: 43%; }
 .grid {
   width: 100%;
   min-width: 0;
@@ -566,9 +558,6 @@ button:disabled { cursor: not-allowed; }
   .darktabs { gap: 6px; }
   .darktabs button, .darkbtn, .mutedbtn { font-size: 13px; padding: 9px 10px; border-radius: 7px; }
   .tablewrap { padding: 0 5px 18px; }
-  .program-title { padding: 2px 7px 6px; font-size: 17px; }
-  .day-program { font-size: 13px; }
-  .day-program th, .day-program td { padding: 6px 4px; }
   .staff-links {
     justify-content: space-between;
     gap: 8px;

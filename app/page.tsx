@@ -36,17 +36,11 @@ type Discipline = "トラック" | "跳躍" | "投てき";
 
 const RESULT_CODES: ResultStatus[] = ["DNS", "DNF", "DQ", "NM"];
 const EVENT_STATUSES: EventStatus[] = ["編成済み", "入力中", "速報", "確定", "訂正中"];
-const DAY_PROGRAM = [
-  ["13:00–13:50", "集合・設営・アップ", ""],
-  ["13:50–14:05", "80m", "工夫すれば100mとれるかも"],
-  ["14:05–14:35", "250m（1周）", ""],
-  ["14:35–15:05", "フィールド種目", "走幅跳・走高跳・砲丸投を並行実施"],
-  ["15:05–15:45", "レク種目、休憩 兼 時間調整", "なんでもOK"],
-  ["15:45–16:00", "500m（250m×2周）", ""],
-  ["16:05–16:25", "ハードル", "110mはとれないかも"],
-  ["16:25–16:50", "1000m（4周）", ""],
-  ["16:50–17:15", "9×400m 全員リレー", "全員参加の最終得点種目"],
-  ["17:15–", "片付け・表彰・引退セレモニー", ""],
+const DISCIPLINE_FILTERS = [
+  { label: "全て", value: "全て" },
+  { label: "トラック", value: "トラック" },
+  { label: "跳躍", value: "跳躍" },
+  { label: "投擲", value: "投てき" },
 ] as const;
 
 function currentTime() {
@@ -71,6 +65,23 @@ function isMeetingState(value: unknown): value is MeetingState {
     && Array.isArray(state.entries)
     && Array.isArray(state.heats)
     && Array.isArray(state.results);
+}
+
+function withRequiredHeats(state: MeetingState) {
+  const requiredCounts: Record<string, number> = { "500m": 3, hurdle: 3 };
+  const heats = [...state.heats];
+  for (const [eventId, count] of Object.entries(requiredCounts)) {
+    for (let number = 1; number <= count; number += 1) {
+      if (heats.some((heat) => heat.eventId === eventId && heat.number === number)) continue;
+      heats.push({
+        id: `${eventId}-heat-${number}`,
+        eventId,
+        number,
+        callCompleteAt: "--:--",
+      });
+    }
+  }
+  return heats.length === state.heats.length ? state : { ...state, heats };
 }
 
 async function openDb() {
@@ -103,7 +114,7 @@ async function idbGetState(): Promise<MeetingState | null> {
     const request = db.transaction("cache").objectStore("cache").get("state");
     request.onsuccess = () => {
       db.close();
-      resolve(isMeetingState(request.result) ? request.result : null);
+      resolve(isMeetingState(request.result) ? withRequiredHeats(request.result) : null);
     };
     request.onerror = () => {
       db.close();
@@ -188,8 +199,9 @@ export default function Home() {
         const response = await fetch("/api/state");
         const data = await response.json() as { state?: unknown; source?: string };
         if (active && isMeetingState(data.state)) {
-          setState(data.state);
-          await idbPut("cache", "state", data.state);
+          const normalized = withRequiredHeats(data.state);
+          setState(normalized);
+          await idbPut("cache", "state", normalized);
         }
         if (active && data.source === "google-sheets") setSyncState("DB同期済み");
       } catch {
@@ -707,7 +719,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/state", { cache: "no-store" });
       const data = await response.json() as { state?: unknown };
-      if (isMeetingState(data.state)) latestState = data.state;
+      if (isMeetingState(data.state)) latestState = withRequiredHeats(data.state);
     } catch {
       // 通信断時は端末上の最新状態を使い、persist側のオフラインキューへ渡す。
     }
@@ -861,16 +873,16 @@ export default function Home() {
   const headerTitle = view === "schedule"
     ? "競技一覧－開始時刻別"
     : view === "results"
-      ? "結果一覧（2026/07/23）"
+      ? "結果一覧（2026/08/03）"
       : view === "team"
-        ? "対抗戦集計（2026/07/23）"
+        ? "対抗戦集計（2026/08/03）"
         : view === "input"
-          ? "記録入力（2026/07/23）"
+          ? "記録入力（2026/08/03）"
           : view === "selfEntry"
-            ? "当日 種目登録（2026/07/23）"
+            ? "当日 種目登録（2026/08/03）"
             : view === "registration"
-              ? "エントリ登録（2026/07/23）"
-              : "大会管理（2026/07/23）";
+              ? "エントリ登録（2026/08/03）"
+              : "大会管理（2026/08/03）";
 
   const renderResultRow = (item: RankedResult, event: Event, showRank = false) => {
     const team = state.teams.find((candidate) => candidate.id === item.athlete.teamId)!;
@@ -911,16 +923,16 @@ export default function Home() {
       {view === "schedule" && (
         <section>
           <div className="meet">
-            校内陸上競技大会　兼　3年生引退試合　2026/07/23
+            校内陸上競技大会　兼　3年生引退試合　2026/08/03
             <br />
-            <div className="powered">Powered By School T&amp;F</div>
+            <div className="powered">Powered By Tomida High School</div>
           </div>
           <div className="controls">
             <div className="row">
-              <select className="select" aria-label="開催日"><option>2026/07/23</option></select>
+              <select className="select" aria-label="開催日"><option>2026/08/03</option></select>
               <div className="seg discipline-seg">
-                {["全て", "トラック", "跳躍", "投てき"].map((value) => (
-                  <button key={value} className={kindFilter === value ? "active" : ""} onClick={() => setKindFilter(value)}>{value}</button>
+                {DISCIPLINE_FILTERS.map(({ label, value }) => (
+                  <button key={value} className={kindFilter === value ? "active" : ""} onClick={() => setKindFilter(value)}>{label}</button>
                 ))}
               </div>
             </div>
@@ -938,16 +950,6 @@ export default function Home() {
               <button>コンディション</button>
             </div>
           </div>
-          <div className="program-title">当日タイムスケジュール</div>
-          <div className="tablewrap">
-            <table className="grid day-program">
-              <thead><tr><th>時刻</th><th>内容</th><th>詳細</th></tr></thead>
-              <tbody>{DAY_PROGRAM.map(([time, content, detail]) => (
-                <tr key={time}><td>{time}</td><td className="event">{content}</td><td className="event">{detail}</td></tr>
-              ))}</tbody>
-            </table>
-          </div>
-          <div className="program-title">競技別一覧</div>
           <div className="tablewrap schedule-wrap">
             <table className="grid schedule-grid">
               <thead>

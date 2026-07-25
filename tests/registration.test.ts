@@ -34,3 +34,8 @@ test("同じ参加種目の重複選択は保存しない", () => {
     /重複/,
   );
 });
+
+test("500mとハードルは3組ずつ用意する", () => {
+  assert.equal(initialState.heats.filter((heat) => heat.eventId === "500m").length, 3);
+  assert.equal(initialState.heats.filter((heat) => heat.eventId === "hurdle").length, 3);
+});
