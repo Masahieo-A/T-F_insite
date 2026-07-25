@@ -143,6 +143,18 @@ button:disabled { cursor: not-allowed; }
   color: #00e;
   text-decoration: underline;
 }
+.staff-links .student-entry-link {
+  font-weight: 700;
+  font-size: 16px;
+}
+.program-title {
+  padding: 4px 12px 7px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.day-program th:nth-child(1) { width: 23%; }
+.day-program th:nth-child(2) { width: 34%; }
+.day-program th:nth-child(3) { width: 43%; }
 .grid {
   width: 100%;
   min-width: 0;
@@ -490,6 +502,30 @@ button:disabled { cursor: not-allowed; }
   padding-top: 10px;
   z-index: 8;
 }
+.self-entry-form {
+  margin: 0 10px 16px;
+  padding: 12px;
+  border: 2px solid var(--line);
+  background: var(--stripe);
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 12px;
+}
+.self-step {
+  display: grid;
+  gap: 5px;
+}
+.self-step label { font-weight: 700; }
+.self-step .select { width: 100%; color: #111; }
+.self-entry-grid th:nth-child(1) { width: 25%; }
+.self-entry-grid th:nth-child(2) { width: 52%; }
+.self-entry-grid th:nth-child(3) { width: 23%; }
+.self-assignment-select {
+  min-height: 46px;
+  border: 2px solid #333;
+  font-size: 17px;
+}
+.self-review { margin-top: 4px; }
 .darkbtn:disabled { background: #bbb; border-color: #999; }
 
 .message {
@@ -530,6 +566,15 @@ button:disabled { cursor: not-allowed; }
   .darktabs { gap: 6px; }
   .darktabs button, .darkbtn, .mutedbtn { font-size: 13px; padding: 9px 10px; border-radius: 7px; }
   .tablewrap { padding: 0 5px 18px; }
+  .program-title { padding: 2px 7px 6px; font-size: 17px; }
+  .day-program { font-size: 13px; }
+  .day-program th, .day-program td { padding: 6px 4px; }
+  .staff-links {
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .staff-links .student-entry-link { font-size: 14px; }
   .grid { font-size: 15px; }
   .grid th, .grid td { padding: 6px 4px; }
   .schedule-grid th:nth-child(1) { width: 13%; }
@@ -591,6 +636,15 @@ button:disabled { cursor: not-allowed; }
   .assignment-grid th, .assignment-grid td { padding: 4px 2px; }
   .assignment-grid .kana { font-size: 9px; }
   .assignment-select { min-height: 32px; padding: 1px; font-size: 10px; }
+  .self-entry-form {
+    margin: 0 5px 12px;
+    padding: 9px;
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .self-step .select { font-size: 16px; min-height: 44px; }
+  .self-entry-grid { font-size: 14px; }
+  .self-assignment-select { min-height: 44px; font-size: 15px; padding: 4px; }
   .athlete-registration-grid, .event-registration-grid { font-size: 12px; }
 }
 
