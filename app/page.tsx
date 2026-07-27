@@ -22,12 +22,13 @@ import {
 } from "@/lib/ranking";
 import { applyBulkCsv, createBulkCsvTemplate } from "@/lib/adminCsv";
 import {
-  applyEventHeatAthleteAssignments,
+  applyEventSlotAthleteAssignments,
   applyAthleteCsv,
   applyAthleteEventAssignments,
   createAthleteCsvTemplate,
+  eventRegistrationSlots,
   eventIdsForAthlete,
-  heatAthleteAssignmentsForEvent,
+  eventSlotAssignmentsForEvent,
 } from "@/lib/registration";
 
 type View = "schedule" | "results" | "team" | "input" | "selfEntry" | "registration" | "admin";
@@ -158,10 +159,6 @@ function displayResult(item: RankedResult, event: Event) {
     : item.result.status;
 }
 
-function normalizeAthleteInput(value: string) {
-  return value.trim().replace(/[ 　]/g, "");
-}
-
 export default function Home() {
   const [state, setState] = useState<MeetingState>(initialState);
   const [view, setView] = useState<View>("schedule");
@@ -222,14 +219,12 @@ export default function Home() {
   const selfEvent = state.events.find((event) => event.id === selfEventId && event.id !== "relay")
     ?? state.events.find((event) => event.id !== "relay")
     ?? state.events[0];
-  const selfHeats = state.heats
-    .filter((heat) => heat.eventId === selfEvent.id)
-    .sort((left, right) => left.number - right.number);
-  const savedSelfHeatAssignments = heatAthleteAssignmentsForEvent(state, selfEvent.id);
+  const selfSlots = eventRegistrationSlots(state, selfEvent.id);
+  const savedSelfHeatAssignments = eventSlotAssignmentsForEvent(state, selfEvent.id);
   const currentSelfHeatInputs = Object.fromEntries(
-    selfHeats.map((heat) => {
-      const savedAthlete = state.athletes.find((athlete) => athlete.id === savedSelfHeatAssignments[heat.id]);
-      return [heat.id, selfHeatAssignments[heat.id] ?? savedAthlete?.name ?? ""];
+    selfSlots.map((slot) => {
+      const savedAthlete = state.athletes.find((athlete) => athlete.id === savedSelfHeatAssignments[slot.id]);
+      return [slot.id, selfHeatAssignments[slot.id] ?? savedAthlete?.name ?? ""];
     }),
   );
   const heatEntries = state.entries.filter((entry) => entry.heatId === selectedHeat?.id);
@@ -714,40 +709,28 @@ export default function Home() {
     setSelfReviewing(false);
   };
 
-  const updateSelfHeatAssignment = (heatId: string, athleteName: string) => {
-    setSelfHeatAssignments((current) => ({ ...current, [heatId]: athleteName }));
+  const updateSelfHeatAssignment = (slotId: string, athleteId: string) => {
+    setSelfHeatAssignments((current) => ({ ...current, [slotId]: athleteId }));
     setSelfReviewing(false);
   };
 
-  const findAthleteBySelfInput = (sourceState: MeetingState, value: string) => {
-    const trimmed = value.trim();
-    const bibMatch = trimmed.match(/^(?:No\.?|Ｎｏ\.?)?\s*(\d+)(?:\s|　|$)/i);
-    if (bibMatch) {
-      const athlete = sourceState.athletes.find((candidate) => candidate.bib === Number(bibMatch[1]));
-      if (athlete) return athlete;
-    }
-    const normalized = normalizeAthleteInput(trimmed);
-    return sourceState.athletes.find((athlete) =>
-      normalizeAthleteInput(athlete.name) === normalized
-      || normalizeAthleteInput(athlete.kana) === normalized);
-  };
-
   const resolveSelfHeatAssignments = (sourceState: MeetingState, eventId: string) => {
-    const sourceHeats = sourceState.heats
-      .filter((heat) => heat.eventId === eventId)
-      .sort((left, right) => left.number - right.number);
-    const sourceSaved = heatAthleteAssignmentsForEvent(sourceState, eventId);
+    const sourceSlots = eventRegistrationSlots(sourceState, eventId);
+    const sourceSaved = eventSlotAssignmentsForEvent(sourceState, eventId);
     const assignments: Record<string, string> = {};
-    for (const heat of sourceHeats) {
-      const savedAthlete = sourceState.athletes.find((athlete) => athlete.id === sourceSaved[heat.id]);
-      const input = selfHeatAssignments[heat.id] ?? savedAthlete?.name ?? "";
-      if (!input.trim()) {
-        assignments[heat.id] = "";
+    for (const slot of sourceSlots) {
+      const athleteId = selfHeatAssignments[slot.id] ?? sourceSaved[slot.id] ?? "";
+      if (!athleteId) {
+        assignments[slot.id] = "";
         continue;
       }
-      const athlete = findAthleteBySelfInput(sourceState, input);
-      if (!athlete) throw new Error(`${heat.number}組: ${input} は選手登録にありません`);
-      assignments[heat.id] = athlete.id;
+      const athlete = sourceState.athletes.find((candidate) => candidate.id === athleteId);
+      if (!athlete) throw new Error(`${slot.label}: 選手登録にない選手です`);
+      if (slot.teamId && athlete.teamId !== slot.teamId) {
+        const team = sourceState.teams.find((candidate) => candidate.id === slot.teamId);
+        throw new Error(`${slot.label}: ${athlete.name}は${team?.name ?? slot.teamId}の選手ではありません`);
+      }
+      assignments[slot.id] = athlete.id;
     }
     return assignments;
   };
@@ -760,7 +743,7 @@ export default function Home() {
         return;
       }
       if (new Set(selected).size !== selected.length) {
-        setMessage("同じ選手を複数の組へ登録できません");
+        setMessage("同じ選手を複数の枠へ登録できません");
         return;
       }
       setSelfReviewing(true);
@@ -781,26 +764,24 @@ export default function Home() {
     const event = latestState.events.find((candidate) => candidate.id === selfEvent.id);
     if (!event) return;
     try {
-      const latestHeats = latestState.heats
-        .filter((heat) => heat.eventId === event.id)
-        .sort((left, right) => left.number - right.number);
-      const latestSavedAssignments = heatAthleteAssignmentsForEvent(latestState, event.id);
+      const latestSlots = eventRegistrationSlots(latestState, event.id);
+      const latestSavedAssignments = eventSlotAssignmentsForEvent(latestState, event.id);
       const assignments = resolveSelfHeatAssignments(latestState, event.id);
-      const assigned = applyEventHeatAthleteAssignments(latestState, event.id, assignments);
+      const assigned = applyEventSlotAthleteAssignments(latestState, event.id, assignments);
       const now = currentTime();
-      const beforeNames = latestHeats
-        .map((heat) => {
-          const athleteId = latestSavedAssignments[heat.id];
+      const beforeNames = latestSlots
+        .map((slot) => {
+          const athleteId = latestSavedAssignments[slot.id];
           const athlete = latestState.athletes.find((candidate) => candidate.id === athleteId);
-          return athlete ? `${heat.number}組:${athlete.name}` : "";
+          return athlete ? `${slot.label}:${athlete.name}` : "";
         })
         .filter(Boolean)
         .join("、") || "未登録";
-      const selectedNames = latestHeats
-        .map((heat) => {
-          const athleteId = assignments[heat.id];
+      const selectedNames = latestSlots
+        .map((slot) => {
+          const athleteId = assignments[slot.id];
           const athlete = latestState.athletes.find((candidate) => candidate.id === athleteId);
-          return athlete ? `${heat.number}組:${athlete.name}` : "";
+          return athlete ? `${slot.label}:${athlete.name}` : "";
         })
         .filter(Boolean)
         .join("、");
@@ -1263,7 +1244,7 @@ export default function Home() {
         <section>
           <div className="result-head">
             <div className="event-title">生徒用　当日種目登録　<span className="sync-label">{syncState}</span></div>
-            <div className="storage-note">競技を選び、1組・2組・3組などの登録枠へ出場する選手の氏名または選手Noを入力してください。全員リレーは選択不要です。</div>
+            <div className="storage-note">競技を選び、登録枠ごとに出場選手をプルダウンから選択してください。走幅跳・走高跳・砲丸投は1組決勝の中に各チーム3枠ずつ表示します。全員リレーは選択不要です。</div>
           </div>
           <div className="self-entry-form">
             <div className="self-step">
@@ -1280,30 +1261,32 @@ export default function Home() {
               </select>
             </div>
           </div>
-          <datalist id="self-athlete-list">
-            {state.athletes.map((athlete) => (
-              <option key={athlete.id} value={athlete.name}>No.{athlete.bib} {state.teams.find((team) => team.id === athlete.teamId)?.shortName}</option>
-            ))}
-          </datalist>
           <div className="tablewrap">
             <table className="grid self-entry-grid">
               <thead><tr><th>登録枠</th><th>氏名</th><th>チーム</th></tr></thead>
-              <tbody>{selfHeats.map((heat) => {
-                const input = currentSelfHeatInputs[heat.id] ?? "";
-                const athlete = findAthleteBySelfInput(state, input);
-                const team = athlete ? state.teams.find((candidate) => candidate.id === athlete.teamId) : undefined;
+              <tbody>{selfSlots.map((slot) => {
+                const athleteId = currentSelfHeatInputs[slot.id] ?? "";
+                const slotTeam = slot.teamId ? state.teams.find((candidate) => candidate.id === slot.teamId) : undefined;
+                const athlete = state.athletes.find((candidate) => candidate.id === athleteId);
+                const team = slotTeam ?? (athlete ? state.teams.find((candidate) => candidate.id === athlete.teamId) : undefined);
+                const selectableAthletes = state.athletes
+                  .filter((candidate) => !slot.teamId || candidate.teamId === slot.teamId)
+                  .sort((left, right) => left.bib - right.bib);
                 return (
-                  <tr key={heat.id}>
-                    <td>{heat.number}組</td>
+                  <tr key={slot.id}>
+                    <td>{slot.label}</td>
                     <td>
-                      <input
-                        className="admin-text-field self-name-field"
-                        list="self-athlete-list"
-                        placeholder="氏名またはNo."
-                        aria-label={`${selfEvent.name}${heat.number}組の氏名`}
-                        value={input}
-                        onChange={(change) => updateSelfHeatAssignment(heat.id, change.target.value)}
-                      />
+                      <select
+                        className="assignment-select self-name-field"
+                        aria-label={`${selfEvent.name}${slot.label}の氏名`}
+                        value={athleteId}
+                        onChange={(change) => updateSelfHeatAssignment(slot.id, change.target.value)}
+                      >
+                        <option value="">未選択</option>
+                        {selectableAthletes.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>No.{candidate.bib}　{candidate.name}</option>
+                        ))}
+                      </select>
                     </td>
                     <td>{team?.shortName ?? "－"}</td>
                   </tr>
@@ -1320,12 +1303,12 @@ export default function Home() {
               <div className="tablewrap">
                 <table className="grid review-grid">
                   <thead><tr><th>競技</th><th>登録枠</th><th>氏名</th></tr></thead>
-                  <tbody>{selfHeats.map((heat) => {
-                    const athlete = findAthleteBySelfInput(state, currentSelfHeatInputs[heat.id] ?? "");
+                  <tbody>{selfSlots.map((slot) => {
+                    const athlete = state.athletes.find((candidate) => candidate.id === (currentSelfHeatInputs[slot.id] ?? ""));
                     return athlete ? (
-                      <tr key={heat.id}>
+                      <tr key={slot.id}>
                         <td className="event">{selfEvent.name}</td>
-                        <td>{heat.number}組</td>
+                        <td>{slot.label}</td>
                         <td className="event">{athlete.name}</td>
                       </tr>
                     ) : null;

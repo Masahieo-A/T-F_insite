@@ -4,8 +4,11 @@ import {
   applyAthleteCsv,
   applyAthleteEventAssignments,
   applyEventHeatAthleteAssignments,
+  applyEventSlotAthleteAssignments,
   createAthleteCsvTemplate,
+  eventRegistrationSlots,
   eventIdsForAthlete,
+  eventSlotAssignmentsForEvent,
   heatAthleteAssignmentsForEvent,
 } from "../lib/registration.ts";
 import { initialState } from "../lib/domain.ts";
@@ -58,14 +61,44 @@ test("当日種目登録は種目ごとの組へ選手を配置する", () => {
   );
 });
 
-test("同じ選手を同じ種目の複数組へ登録しない", () => {
+test("同じ選手を同じ種目の複数枠へ登録しない", () => {
   const heats = initialState.heats.filter((heat) => heat.eventId === "80m");
   assert.throws(
     () => applyEventHeatAthleteAssignments(initialState, "80m", {
       [heats[0].id]: initialState.athletes[0].id,
       [heats[1].id]: initialState.athletes[0].id,
     }),
-    /複数組/,
+    /複数枠/,
+  );
+});
+
+test("フィールド3種目は1組決勝のまま各チーム3枠を用意する", () => {
+  const slots = eventRegistrationSlots(initialState, "long");
+  const selectedAthletes = slots.map((slot) =>
+    initialState.athletes.filter((athlete) => athlete.teamId === slot.teamId)[slot.laneOrOrder % 3],
+  );
+  const next = applyEventSlotAthleteAssignments(initialState, "long", Object.fromEntries(
+    slots.map((slot, index) => [slot.id, selectedAthletes[index].id]),
+  ));
+  const entries = next.entries.filter((entry) => entry.eventId === "long");
+
+  assert.equal(slots.length, 9);
+  assert.equal(new Set(slots.map((slot) => slot.heatId)).size, 1);
+  assert.deepEqual(slots.map((slot) => slot.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(entries.map((entry) => entry.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(eventSlotAssignmentsForEvent(next, "long"), Object.fromEntries(
+    slots.map((slot, index) => [slot.id, selectedAthletes[index].id]),
+  ));
+});
+
+test("フィールドのチーム枠には別チームの選手を登録しない", () => {
+  const slots = eventRegistrationSlots(initialState, "shot");
+  const aSlot = slots.find((slot) => slot.teamId === "A")!;
+  const bAthlete = initialState.athletes.find((athlete) => athlete.teamId === "B")!;
+
+  assert.throws(
+    () => applyEventSlotAthleteAssignments(initialState, "shot", { [aSlot.id]: bAthlete.id }),
+    /Aチーム/,
   );
 });
 

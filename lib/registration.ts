@@ -79,20 +79,61 @@ export function eventIdsForAthlete(state: MeetingState, athleteId: string) {
     .slice(0, 3);
 }
 
-export function heatAthleteAssignmentsForEvent(state: MeetingState, eventId: string) {
+export type EventRegistrationSlot = {
+  id: string;
+  label: string;
+  heatId: string;
+  laneOrOrder: number;
+  teamId?: string;
+};
+
+const TEAM_FIELD_EVENT_IDS = new Set(["long", "high", "shot"]);
+
+function isTeamFieldEvent(eventId: string) {
+  return TEAM_FIELD_EVENT_IDS.has(eventId);
+}
+
+export function eventRegistrationSlots(state: MeetingState, eventId: string): EventRegistrationSlot[] {
+  const heats = state.heats
+    .filter((heat) => heat.eventId === eventId)
+    .sort((left, right) => left.number - right.number);
+  if (isTeamFieldEvent(eventId)) {
+    const heat = heats[0];
+    if (!heat) return [];
+    return [...state.teams]
+      .sort((left, right) => left.displayOrder - right.displayOrder)
+      .flatMap((team, teamIndex) =>
+        [1, 2, 3].map((slotNumber) => ({
+          id: `${eventId}-${team.id}-slot-${slotNumber}`,
+          label: `${heat.number}組 ${team.shortName}チーム${slotNumber}枠`,
+          heatId: heat.id,
+          laneOrOrder: teamIndex * 3 + slotNumber,
+          teamId: team.id,
+        })),
+      );
+  }
+  return heats.map((heat) => ({
+    id: heat.id,
+    label: `${heat.number}組`,
+    heatId: heat.id,
+    laneOrOrder: 1,
+  }));
+}
+
+export function eventSlotAssignmentsForEvent(state: MeetingState, eventId: string) {
   return Object.fromEntries(
-    state.heats
-      .filter((heat) => heat.eventId === eventId)
-      .map((heat) => {
-        const entry = state.entries
-          .filter((candidate) => candidate.heatId === heat.id)
-          .sort((left, right) => left.laneOrOrder - right.laneOrOrder)[0];
-        return [heat.id, entry?.athleteId ?? ""];
+    eventRegistrationSlots(state, eventId)
+      .map((slot) => {
+        const entry = state.entries.find((candidate) =>
+          candidate.eventId === eventId
+          && candidate.heatId === slot.heatId
+          && candidate.laneOrOrder === slot.laneOrOrder);
+        return [slot.id, entry?.athleteId ?? ""];
       }),
   );
 }
 
-export function applyEventHeatAthleteAssignments(
+export function applyEventSlotAthleteAssignments(
   state: MeetingState,
   eventId: string,
   assignments: Record<string, string>,
@@ -100,25 +141,32 @@ export function applyEventHeatAthleteAssignments(
   const event = state.events.find((candidate) => candidate.id === eventId);
   if (!event) throw new Error("種目が見つかりません");
 
-  const eventHeats = state.heats
-    .filter((heat) => heat.eventId === eventId)
-    .sort((left, right) => left.number - right.number);
-  if (!eventHeats.length) throw new Error(`${event.name}: 組がありません`);
+  const slots = eventRegistrationSlots(state, eventId);
+  if (!slots.length) throw new Error(`${event.name}: 登録枠がありません`);
 
-  const heatIds = new Set(eventHeats.map((heat) => heat.id));
-  const selected = eventHeats
-    .map((heat) => assignments[heat.id] ?? "")
+  const selected = slots
+    .map((slot) => assignments[slot.id] ?? "")
     .filter(Boolean);
   if (new Set(selected).size !== selected.length) {
-    throw new Error("同じ選手を同じ種目の複数組へ登録できません");
+    throw new Error("同じ選手を同じ種目の複数枠へ登録できません");
   }
   const athleteIds = new Set(state.athletes.map((athlete) => athlete.id));
   const missingAthlete = selected.find((athleteId) => !athleteIds.has(athleteId));
   if (missingAthlete) throw new Error("存在しない選手が選択されています");
+  const teamsById = new Map(state.teams.map((team) => [team.id, team]));
+  for (const slot of slots) {
+    const athleteId = assignments[slot.id];
+    if (!athleteId || !slot.teamId) continue;
+    const athlete = state.athletes.find((candidate) => candidate.id === athleteId)!;
+    if (athlete.teamId !== slot.teamId) {
+      const team = teamsById.get(slot.teamId);
+      throw new Error(`${slot.label}: ${athlete.name}は${team?.name ?? slot.teamId}の選手ではありません`);
+    }
+  }
 
   const previousEventEntries = state.entries.filter((entry) => entry.eventId === eventId);
-  const previousByHeat = new Map(previousEventEntries.map((entry) => [entry.heatId, entry]));
-  const entries = state.entries.filter((entry) => !heatIds.has(entry.heatId));
+  const previousBySlot = new Map(previousEventEntries.map((entry) => [`${entry.heatId}:${entry.laneOrOrder}`, entry]));
+  const entries = state.entries.filter((entry) => entry.eventId !== eventId);
   const keptEntryIds = new Set(entries.map((entry) => entry.id));
 
   for (const athleteId of selected) {
@@ -132,16 +180,16 @@ export function applyEventHeatAthleteAssignments(
     }
   }
 
-  for (const heat of eventHeats) {
-    const athleteId = assignments[heat.id];
+  for (const slot of slots) {
+    const athleteId = assignments[slot.id];
     if (!athleteId) continue;
-    const previous = previousByHeat.get(heat.id);
+    const previous = previousBySlot.get(`${slot.heatId}:${slot.laneOrOrder}`);
     const entry: Entry = {
-      id: previous?.athleteId === athleteId ? previous.id : `entry-self-${eventId}-${heat.number}-${athleteId}`,
+      id: previous?.athleteId === athleteId ? previous.id : `entry-self-${eventId}-${slot.id}-${athleteId}`,
       eventId,
-      heatId: heat.id,
+      heatId: slot.heatId,
       athleteId,
-      laneOrOrder: 1,
+      laneOrOrder: slot.laneOrOrder,
       scoringEligible: true,
     };
     entries.push(entry);
@@ -153,6 +201,18 @@ export function applyEventHeatAthleteAssignments(
     entries,
     results: state.results.filter((result) => keptEntryIds.has(result.entryId)),
   };
+}
+
+export function heatAthleteAssignmentsForEvent(state: MeetingState, eventId: string) {
+  return eventSlotAssignmentsForEvent(state, eventId);
+}
+
+export function applyEventHeatAthleteAssignments(
+  state: MeetingState,
+  eventId: string,
+  assignments: Record<string, string>,
+) {
+  return applyEventSlotAthleteAssignments(state, eventId, assignments);
 }
 
 export function applyAthleteEventAssignments(
