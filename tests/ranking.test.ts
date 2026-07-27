@@ -134,7 +134,7 @@ test("実力帯を使わず全体順位から6・4・2点を付ける", () => {
     transactions.filter((transaction) => transaction.reason === "event-rank").map((transaction) => transaction.points),
     [6, 4, 2],
   );
-  assert.ok(transactions.some((transaction) => transaction.reason === "pb-bonus"));
+  assert.equal(transactions.some((transaction) => transaction.reason === "pb-bonus"), false);
 });
 
 test("同着は該当順位点を平均し、無効記録は0点にする", () => {
@@ -169,7 +169,7 @@ test("同着は該当順位点を平均し、無効記録は0点にする", () =
   assert.equal(scores[3].rank, null);
 });
 
-test("PBボーナスは1チーム・1種目につき2点を上限にする", () => {
+test("PBボーナスは得点に加算しない", () => {
   const pbAthletes = athletes.slice(0, 3).map((athlete, index) => ({
     ...athlete,
     id: `pb-athlete-${index}`,
@@ -197,16 +197,20 @@ test("PBボーナスは1チーム・1種目につき2点を上限にする", () 
     rankResults(pbResults, pbEntries, pbAthletes, sprint),
     scoreRules[0],
   );
-  assert.equal(scores.reduce((sum, score) => sum + score.pbPoints, 0), 2);
+  assert.equal(scores.reduce((sum, score) => sum + score.pbPoints, 0), 0);
+  assert.equal(scores.reduce((sum, score) => sum + score.totalPoints, 0), 12);
 });
 
-test("総合同点は基本点・種目勝利・個人1位数の順で判定し、完全同点は同順位にする", () => {
+test("総合同点は得点・種目勝利・個人1位数の順で判定し、完全同点は同順位にする", () => {
   const tied = calculateOverallStandings(teams, [
     { id: "r1", eventId: "e1", teamId: "A", points: 6, reason: "event-rank", note: "" },
     { id: "b1", eventId: "e1", teamId: "B", points: 6, reason: "event-rank", note: "" },
     { id: "g1", eventId: "e1", teamId: "C", points: 4, reason: "event-rank", note: "" },
+    { id: "legacy-pb", eventId: "e1", teamId: "C", points: 100, reason: "pb-bonus", note: "旧PB" },
   ]);
   assert.equal(tied[0].rank, 1);
   assert.equal(tied[1].rank, 1);
   assert.equal(tied[2].rank, 3);
+  assert.equal(tied[2].points, 4);
+  assert.equal(tied[2].pbPoints, 0);
 });

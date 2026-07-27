@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   applyAthleteCsv,
   applyAthleteEventAssignments,
+  applyEventHeatAthleteAssignments,
   createAthleteCsvTemplate,
   eventIdsForAthlete,
+  heatAthleteAssignmentsForEvent,
 } from "../lib/registration.ts";
 import { initialState } from "../lib/domain.ts";
 
@@ -32,6 +34,38 @@ test("同じ参加種目の重複選択は保存しない", () => {
   assert.throws(
     () => applyAthleteEventAssignments(initialState, { [athlete.id]: ["80m", "80m"] }),
     /重複/,
+  );
+});
+
+test("当日種目登録は種目ごとの組へ選手を配置する", () => {
+  const heats = initialState.heats.filter((heat) => heat.eventId === "80m");
+  const next = applyEventHeatAthleteAssignments(initialState, "80m", {
+    [heats[0].id]: initialState.athletes[0].id,
+    [heats[1].id]: initialState.athletes[1].id,
+    [heats[2].id]: initialState.athletes[2].id,
+  });
+
+  assert.deepEqual(heatAthleteAssignmentsForEvent(next, "80m"), {
+    [heats[0].id]: initialState.athletes[0].id,
+    [heats[1].id]: initialState.athletes[1].id,
+    [heats[2].id]: initialState.athletes[2].id,
+  });
+  assert.deepEqual(
+    next.entries
+      .filter((entry) => entry.eventId === "80m")
+      .map((entry) => entry.laneOrOrder),
+    [1, 1, 1],
+  );
+});
+
+test("同じ選手を同じ種目の複数組へ登録しない", () => {
+  const heats = initialState.heats.filter((heat) => heat.eventId === "80m");
+  assert.throws(
+    () => applyEventHeatAthleteAssignments(initialState, "80m", {
+      [heats[0].id]: initialState.athletes[0].id,
+      [heats[1].id]: initialState.athletes[0].id,
+    }),
+    /複数組/,
   );
 });
 

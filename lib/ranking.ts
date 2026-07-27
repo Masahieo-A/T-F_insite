@@ -195,27 +195,8 @@ export function calculateAthleteEventScores(
     row.basePoints = sharedPlacePoints(item.rank!, tiedCount, points);
   }
 
-  if (event.id === "relay") {
-    rows.forEach((row) => {
-      row.totalPoints = row.basePoints;
-    });
-    return rows;
-  }
-
-  for (const teamId of new Set(rows.map((row) => row.teamId))) {
-    const pbCandidates = scoringRanked.filter((item) =>
-      item.athlete.teamId === teamId
-      && item.result.isPersonalBest
-      && item.rank !== null,
-    );
-    pbCandidates.slice(0, 2).forEach((item) => {
-      const row = rows.find((candidate) => candidate.entryId === item.entry.id)!;
-      row.pbPoints = rule.pbBonus;
-    });
-  }
-
   rows.forEach((row) => {
-    row.totalPoints = Math.round((row.basePoints + row.pbPoints) * 10) / 10;
+    row.totalPoints = row.basePoints;
   });
   return rows;
 }
@@ -239,15 +220,7 @@ export function calculateEventScoreTransactions(
       reason: "event-rank" as const,
       note: `${rankLabel}${score.rank}位 ${score.athleteName}`,
     }] : [];
-    const pb = score.pbPoints > 0 ? [{
-      id: `${event.id}-${score.entryId}-pb`,
-      eventId: event.id,
-      teamId: score.teamId,
-      points: score.pbPoints,
-      reason: "pb-bonus" as const,
-      note: `${score.athleteName} PB`,
-    }] : [];
-    return [...base, ...pb];
+    return base;
   });
 }
 
@@ -271,9 +244,6 @@ export function calculateOverallStandings(
     const basePoints = own
       .filter((transaction) => transaction.reason !== "pb-bonus")
       .reduce((sum, transaction) => sum + transaction.points, 0);
-    const pbPoints = own
-      .filter((transaction) => transaction.reason === "pb-bonus")
-      .reduce((sum, transaction) => sum + transaction.points, 0);
     const eventWins = eventIds.filter((eventId) => {
       const teamTotals = teams.map((candidate) => transactions
         .filter((transaction) =>
@@ -296,9 +266,9 @@ export function calculateOverallStandings(
     const relayRank = Number(relayNote.match(/リレー(\d+)位/)?.[1] ?? 99);
     return {
       ...team,
-      points: Math.round((basePoints + pbPoints) * 10) / 10,
+      points: Math.round(basePoints * 10) / 10,
       basePoints: Math.round(basePoints * 10) / 10,
-      pbPoints: Math.round(pbPoints * 10) / 10,
+      pbPoints: 0,
       eventWins,
       bandWins: individualWins,
       relayRank,

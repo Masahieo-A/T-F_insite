@@ -141,10 +141,8 @@ button:disabled { cursor: not-allowed; }
   font-weight: 400;
 }
 .summary-grid th:nth-child(1) { width: 14%; }
-.summary-grid th:nth-child(2) { width: 34%; }
-.summary-grid th:nth-child(3) { width: 18%; }
-.summary-grid th:nth-child(4) { width: 14%; }
-.summary-grid th:nth-child(5) { width: 20%; }
+.summary-grid th:nth-child(2) { width: 58%; }
+.summary-grid th:nth-child(3) { width: 28%; }
 .leader-row {
   background: #fff1bd !important;
   font-weight: 700;
@@ -175,9 +173,16 @@ button:disabled { cursor: not-allowed; }
   padding: 0 10px 18px;
   font-size: 14px;
 }
-.staff-links a {
+.staff-links .link-button {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   color: #00e;
   text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
 }
 .staff-links .student-entry-link {
   font-weight: 700;
@@ -205,10 +210,10 @@ button:disabled { cursor: not-allowed; }
 .grid a { color: #00e; text-decoration: underline; }
 .grid .event { text-align: left; }
 .schedule-grid th:nth-child(1) { width: 13%; }
-.schedule-grid th:nth-child(2) { width: 47%; }
-.schedule-grid th:nth-child(3) { width: 16%; }
-.schedule-grid th:nth-child(4) { width: 10%; }
-.schedule-grid th:nth-child(5) { width: 14%; }
+.schedule-grid th:nth-child(2) { width: 36%; }
+.schedule-grid th:nth-child(3) { width: 14%; }
+.schedule-grid th:nth-child(4) { width: 8%; }
+.schedule-grid th:nth-child(5) { width: 29%; }
 .empty {
   padding: 30px 10px !important;
   text-align: center;
@@ -270,7 +275,6 @@ button:disabled { cursor: not-allowed; }
   z-index: 8;
 }
 .scorecol { font-size: 24px; white-space: nowrap; }
-.pb { color: #b00000; font-size: 13px; font-weight: 700; }
 .result-grid th:nth-child(1) { width: 10%; }
 .result-grid th:nth-child(2) { width: 13%; }
 .result-grid th:nth-child(3) { width: 32%; }
@@ -279,16 +283,13 @@ button:disabled { cursor: not-allowed; }
 .provisional-text, .sync-label { font-size: .7em; font-weight: 400; }
 
 .team-grid th:nth-child(1) { width: 14%; }
-.team-grid th:nth-child(2) { width: 34%; }
-.team-grid th:nth-child(3) { width: 20%; }
-.team-grid th:nth-child(4), .team-grid th:nth-child(5) { width: 16%; }
-.athlete-score-grid th:nth-child(1) { width: 20%; }
-.athlete-score-grid th:nth-child(2) { width: 24%; }
-.athlete-score-grid th:nth-child(3) { width: 12%; }
-.athlete-score-grid th:nth-child(4) { width: 16%; }
-.athlete-score-grid th:nth-child(5),
-.athlete-score-grid th:nth-child(6),
-.athlete-score-grid th:nth-child(7) { width: 9.33%; }
+.team-grid th:nth-child(2) { width: 58%; }
+.team-grid th:nth-child(3) { width: 28%; }
+.athlete-score-grid th:nth-child(1) { width: 24%; }
+.athlete-score-grid th:nth-child(2) { width: 28%; }
+.athlete-score-grid th:nth-child(3) { width: 14%; }
+.athlete-score-grid th:nth-child(4) { width: 18%; }
+.athlete-score-grid th:nth-child(5) { width: 16%; }
 .transaction-grid th:nth-child(1) { width: 25%; }
 .transaction-grid th:nth-child(2) { width: 18%; }
 .transaction-grid th:nth-child(3) { width: 43%; }
@@ -554,7 +555,9 @@ button:disabled { cursor: not-allowed; }
 .self-entry-grid th:nth-child(1) { width: 25%; }
 .self-entry-grid th:nth-child(2) { width: 52%; }
 .self-entry-grid th:nth-child(3) { width: 23%; }
-.self-assignment-select {
+.self-name-field {
+  width: 100%;
+  box-sizing: border-box;
   min-height: 46px;
   border: 2px solid #333;
   font-size: 17px;
@@ -616,10 +619,10 @@ button:disabled { cursor: not-allowed; }
   .grid { font-size: 15px; }
   .grid th, .grid td { padding: 6px 4px; }
   .schedule-grid th:nth-child(1) { width: 13%; }
-  .schedule-grid th:nth-child(2) { width: 47%; }
-  .schedule-grid th:nth-child(3) { width: 16%; }
-  .schedule-grid th:nth-child(4) { width: 10%; }
-  .schedule-grid th:nth-child(5) { width: 14%; }
+  .schedule-grid th:nth-child(2) { width: 34%; }
+  .schedule-grid th:nth-child(3) { width: 13%; }
+  .schedule-grid th:nth-child(4) { width: 8%; }
+  .schedule-grid th:nth-child(5) { width: 32%; }
   .schedule-grid th { font-size: 13px; }
   .result-head { padding: 12px 10px 4px; }
   .event-title { font-size: 20px; margin-bottom: 9px; }
@@ -633,7 +636,6 @@ button:disabled { cursor: not-allowed; }
   .athlete { line-height: 1.35; }
   .kana { font-size: 12px; }
   .scorecol { font-size: 17px; }
-  .pb { display: block; font-size: 10px; }
   .note { padding: 12px 6px; font-size: 15px; }
   .result-grid th { font-size: 14px; }
   .input-selects { gap: 7px; }
@@ -684,7 +686,7 @@ button:disabled { cursor: not-allowed; }
   }
   .self-step .select { font-size: 16px; min-height: 44px; }
   .self-entry-grid { font-size: 14px; }
-  .self-assignment-select { min-height: 44px; font-size: 15px; padding: 4px; }
+  .self-name-field { min-height: 44px; font-size: 15px; padding: 4px; }
   .athlete-registration-grid, .event-registration-grid { font-size: 12px; }
 }
 

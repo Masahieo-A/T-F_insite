@@ -22,10 +22,12 @@ import {
 } from "@/lib/ranking";
 import { applyBulkCsv, createBulkCsvTemplate } from "@/lib/adminCsv";
 import {
+  applyEventHeatAthleteAssignments,
   applyAthleteCsv,
   applyAthleteEventAssignments,
   createAthleteCsvTemplate,
   eventIdsForAthlete,
+  heatAthleteAssignmentsForEvent,
 } from "@/lib/registration";
 
 type View = "schedule" | "results" | "team" | "input" | "selfEntry" | "registration" | "admin";
@@ -156,6 +158,10 @@ function displayResult(item: RankedResult, event: Event) {
     : item.result.status;
 }
 
+function normalizeAthleteInput(value: string) {
+  return value.trim().replace(/[ 　]/g, "");
+}
+
 export default function Home() {
   const [state, setState] = useState<MeetingState>(initialState);
   const [view, setView] = useState<View>("schedule");
@@ -180,9 +186,8 @@ export default function Home() {
   const [newAthleteName, setNewAthleteName] = useState("");
   const [newAthleteSex, setNewAthleteSex] = useState<"男子" | "女子">("男子");
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({});
-  const [selfTeamId, setSelfTeamId] = useState("A");
-  const [selfAthleteId, setSelfAthleteId] = useState("");
-  const [selfAssignments, setSelfAssignments] = useState(["", "", ""]);
+  const [selfEventId, setSelfEventId] = useState("80m");
+  const [selfHeatAssignments, setSelfHeatAssignments] = useState<Record<string, string>>({});
   const [selfReviewing, setSelfReviewing] = useState(false);
   const [newEntryHeatId, setNewEntryHeatId] = useState("");
   const [newEntryAthleteId, setNewEntryAthleteId] = useState("");
@@ -214,6 +219,19 @@ export default function Home() {
   const selectedEvent = state.events.find((event) => event.id === selectedEventId) ?? state.events[0];
   const selectedHeats = state.heats.filter((heat) => heat.eventId === selectedEvent.id);
   const selectedHeat = selectedHeats.find((heat) => heat.id === selectedHeatId) ?? selectedHeats[0];
+  const selfEvent = state.events.find((event) => event.id === selfEventId && event.id !== "relay")
+    ?? state.events.find((event) => event.id !== "relay")
+    ?? state.events[0];
+  const selfHeats = state.heats
+    .filter((heat) => heat.eventId === selfEvent.id)
+    .sort((left, right) => left.number - right.number);
+  const savedSelfHeatAssignments = heatAthleteAssignmentsForEvent(state, selfEvent.id);
+  const currentSelfHeatInputs = Object.fromEntries(
+    selfHeats.map((heat) => {
+      const savedAthlete = state.athletes.find((athlete) => athlete.id === savedSelfHeatAssignments[heat.id]);
+      return [heat.id, selfHeatAssignments[heat.id] ?? savedAthlete?.name ?? ""];
+    }),
+  );
   const heatEntries = state.entries.filter((entry) => entry.heatId === selectedHeat?.id);
   const eventEntries = state.entries.filter((entry) => entry.eventId === selectedEvent.id);
   const inputChangeCount = heatEntries.filter((entry) =>
@@ -304,8 +322,6 @@ export default function Home() {
       const raw = inputDrafts[entry.id];
       if (!code && !raw) return;
       const value = code ? null : normalizePerformance(raw, selectedEvent);
-      const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
-      const pb = athlete.personalBests[selectedEvent.id] ?? null;
       const result: Result = {
         id: existingIndex >= 0 ? nextResults[existingIndex].id : `result-${entry.id}`,
         entryId: entry.id,
@@ -313,7 +329,7 @@ export default function Home() {
         displayValue: formatPerformance(value, selectedEvent),
         status: code ?? "OK",
         provisional: true,
-        isPersonalBest: value !== null && pb !== null && (selectedEvent.direction === "asc" ? value < pb : value > pb),
+        isPersonalBest: false,
       };
       if (existingIndex >= 0) nextResults[existingIndex] = result;
       else nextResults.push(result);
@@ -439,7 +455,7 @@ export default function Home() {
         displayValue: formatPerformance(value, selectedEvent),
         status: code ?? "OK",
         provisional: true,
-        isPersonalBest: before?.isPersonalBest ?? false,
+        isPersonalBest: false,
       };
       if (index >= 0) nextResults[index] = nextResult;
       else nextResults.push(nextResult);
@@ -692,33 +708,65 @@ export default function Home() {
     }
   };
 
-  const chooseSelfAthlete = (athleteId: string) => {
-    setSelfAthleteId(athleteId);
-    const current = eventIdsForAthlete(state, athleteId).filter((eventId) => eventId !== "relay");
-    setSelfAssignments([current[0] ?? "", current[1] ?? "", current[2] ?? ""]);
+  const chooseSelfEvent = (eventId: string) => {
+    setSelfEventId(eventId);
+    setSelfHeatAssignments({});
     setSelfReviewing(false);
   };
 
-  const updateSelfAssignment = (slot: number, eventId: string) => {
-    setSelfAssignments((current) => current.map((value, index) => index === slot ? eventId : value));
+  const updateSelfHeatAssignment = (heatId: string, athleteName: string) => {
+    setSelfHeatAssignments((current) => ({ ...current, [heatId]: athleteName }));
     setSelfReviewing(false);
+  };
+
+  const findAthleteBySelfInput = (sourceState: MeetingState, value: string) => {
+    const trimmed = value.trim();
+    const bibMatch = trimmed.match(/^(?:No\.?|Ｎｏ\.?)?\s*(\d+)(?:\s|　|$)/i);
+    if (bibMatch) {
+      const athlete = sourceState.athletes.find((candidate) => candidate.bib === Number(bibMatch[1]));
+      if (athlete) return athlete;
+    }
+    const normalized = normalizeAthleteInput(trimmed);
+    return sourceState.athletes.find((athlete) =>
+      normalizeAthleteInput(athlete.name) === normalized
+      || normalizeAthleteInput(athlete.kana) === normalized);
+  };
+
+  const resolveSelfHeatAssignments = (sourceState: MeetingState, eventId: string) => {
+    const sourceHeats = sourceState.heats
+      .filter((heat) => heat.eventId === eventId)
+      .sort((left, right) => left.number - right.number);
+    const sourceSaved = heatAthleteAssignmentsForEvent(sourceState, eventId);
+    const assignments: Record<string, string> = {};
+    for (const heat of sourceHeats) {
+      const savedAthlete = sourceState.athletes.find((athlete) => athlete.id === sourceSaved[heat.id]);
+      const input = selfHeatAssignments[heat.id] ?? savedAthlete?.name ?? "";
+      if (!input.trim()) {
+        assignments[heat.id] = "";
+        continue;
+      }
+      const athlete = findAthleteBySelfInput(sourceState, input);
+      if (!athlete) throw new Error(`${heat.number}組: ${input} は選手登録にありません`);
+      assignments[heat.id] = athlete.id;
+    }
+    return assignments;
   };
 
   const reviewSelfEntry = () => {
-    if (!selfAthleteId) {
-      setMessage("自分の氏名を選択してください");
-      return;
+    try {
+      const selected = Object.values(resolveSelfHeatAssignments(state, selfEvent.id)).filter(Boolean);
+      if (selected.length === 0) {
+        setMessage("登録する選手を1名以上入力してください");
+        return;
+      }
+      if (new Set(selected).size !== selected.length) {
+        setMessage("同じ選手を複数の組へ登録できません");
+        return;
+      }
+      setSelfReviewing(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "種目登録の確認に失敗しました");
     }
-    const selected = selfAssignments.filter(Boolean);
-    if (selected.length === 0) {
-      setMessage("出場する種目を1つ以上選択してください");
-      return;
-    }
-    if (new Set(selected).size !== selected.length) {
-      setMessage("同じ種目を重複して選択できません");
-      return;
-    }
-    setSelfReviewing(true);
   };
 
   const saveSelfEntry = async () => {
@@ -730,16 +778,30 @@ export default function Home() {
     } catch {
       // 通信断時は端末上の最新状態を使い、persist側のオフラインキューへ渡す。
     }
-    const athlete = latestState.athletes.find((candidate) => candidate.id === selfAthleteId);
-    if (!athlete) return;
+    const event = latestState.events.find((candidate) => candidate.id === selfEvent.id);
+    if (!event) return;
     try {
-      const assigned = applyAthleteEventAssignments(latestState, {
-        [athlete.id]: selfAssignments.filter(Boolean),
-      });
+      const latestHeats = latestState.heats
+        .filter((heat) => heat.eventId === event.id)
+        .sort((left, right) => left.number - right.number);
+      const latestSavedAssignments = heatAthleteAssignmentsForEvent(latestState, event.id);
+      const assignments = resolveSelfHeatAssignments(latestState, event.id);
+      const assigned = applyEventHeatAthleteAssignments(latestState, event.id, assignments);
       const now = currentTime();
-      const selectedNames = selfAssignments
+      const beforeNames = latestHeats
+        .map((heat) => {
+          const athleteId = latestSavedAssignments[heat.id];
+          const athlete = latestState.athletes.find((candidate) => candidate.id === athleteId);
+          return athlete ? `${heat.number}組:${athlete.name}` : "";
+        })
         .filter(Boolean)
-        .map((eventId) => latestState.events.find((event) => event.id === eventId)?.name)
+        .join("、") || "未登録";
+      const selectedNames = latestHeats
+        .map((heat) => {
+          const athleteId = assignments[heat.id];
+          const athlete = latestState.athletes.find((candidate) => candidate.id === athleteId);
+          return athlete ? `${heat.number}組:${athlete.name}` : "";
+        })
         .filter(Boolean)
         .join("、");
       const next: MeetingState = {
@@ -747,18 +809,19 @@ export default function Home() {
         auditLogs: [{
           id: crypto.randomUUID(),
           at: now,
-          actor: athlete.name,
+          actor: "生徒登録端末",
           action: "当日種目登録",
-          entity: athlete.name,
-          before: eventIdsForAthlete(latestState, athlete.id).map((eventId) => latestState.events.find((event) => event.id === eventId)?.name).filter(Boolean).join("、") || "未登録",
+          entity: event.name,
+          before: beforeNames,
           after: selectedNames,
-          reason: "生徒本人による登録",
+          reason: "種目別の組登録",
         }, ...latestState.auditLogs],
         updatedAt: now,
       };
-      await persist(next, "当日種目登録", `${athlete.name}: ${selectedNames}`);
+      await persist(next, "当日種目登録", `${event.name}: ${selectedNames}`);
+      setSelfHeatAssignments({});
       setSelfReviewing(false);
-      setMessage(`${athlete.name}さんの出場種目を保存しました`);
+      setMessage(`${event.name}の組登録を保存しました`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "種目登録の保存に失敗しました");
     }
@@ -905,7 +968,6 @@ export default function Home() {
         <td className="affiliation">{team.name}<br />{item.athlete.region}</td>
         <td className="scorecol">
           {displayResult(item, event)}
-          {item.result.isPersonalBest && item.result.status === "OK" && <span className="pb"> PB</span>}
         </td>
       </tr>
     );
@@ -953,13 +1015,11 @@ export default function Home() {
             <div className="overall-summary">
               <div className="summary-heading">総合順位 <span>{hasTeamScores ? "速報・確定済み種目から自動計算" : "結果入力後に自動計算"}</span></div>
               <table className="grid summary-grid">
-                <thead><tr><th>順位</th><th>チーム</th><th>基本点</th><th>PB</th><th>合計</th></tr></thead>
+                <thead><tr><th>順位</th><th>チーム</th><th>得点</th></tr></thead>
                 <tbody>{standings.map((team) => (
                   <tr key={team.id} className={hasTeamScores && team.rank === 1 ? "leader-row" : ""}>
                     <td>{hasTeamScores ? `${team.rank}位` : "-"}</td>
                     <td className="event">{team.name}{hasTeamScores && team.rank === 1 && <span className="leader-label"> 暫定1位</span>}</td>
-                    <td>{team.basePoints}</td>
-                    <td>{team.pbPoints}</td>
                     <td className="scorecol">{team.points}</td>
                   </tr>
                 ))}</tbody>
@@ -970,19 +1030,25 @@ export default function Home() {
           <div className="tablewrap schedule-wrap">
             <table className="grid schedule-grid">
               <thead>
-                <tr><th>開始時刻</th><th>競技名</th><th>ﾗｳﾝﾄﾞ</th><th>組</th><th>着取</th></tr>
+                <tr><th>開始時刻</th><th>競技名</th><th>ﾗｳﾝﾄﾞ</th><th>組</th><th>氏名</th></tr>
               </thead>
               <tbody>
                 {visibleSchedule.length === 0 && <tr><td colSpan={5} className="empty">該当する競技はありません</td></tr>}
                 {visibleSchedule.map((heat) => {
                   const event = state.events.find((candidate) => candidate.id === heat.eventId)!;
+                  const heatAthleteNames = state.entries
+                    .filter((entry) => entry.heatId === heat.id)
+                    .sort((left, right) => left.laneOrOrder - right.laneOrOrder)
+                    .map((entry) => state.athletes.find((athlete) => athlete.id === entry.athleteId)?.name)
+                    .filter(Boolean)
+                    .join("、");
                   return (
                     <tr key={heat.id}>
                       <td>{event.startTime}</td>
                       <td className="event">{fullEventName(event)}</td>
                       <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{event.round}</a></td>
                       <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{heat.number}</a></td>
-                      <td>-</td>
+                      <td className="event">{heatAthleteNames || "-"}</td>
                     </tr>
                   );
                 })}
@@ -990,10 +1056,10 @@ export default function Home() {
             </table>
           </div>
           <div className="staff-links">
-            <a href="#" className="student-entry-link" onClick={(event) => { event.preventDefault(); setView("selfEntry"); window.scrollTo(0, 0); }}>当日 種目登録</a>
-            <a href="#" onClick={(event) => { event.preventDefault(); openEvent("80m", "input"); }}>記録入力</a>
-            <a href="#" onClick={(event) => { event.preventDefault(); setView("registration"); window.scrollTo(0, 0); }}>エントリ登録</a>
-            <a href="#" onClick={(event) => { event.preventDefault(); setView("admin"); }}>大会管理</a>
+            <button type="button" className="link-button student-entry-link" onClick={() => { setView("selfEntry"); window.scrollTo(0, 0); }}>当日 種目登録</button>
+            <button type="button" className="link-button" onClick={() => openEvent("80m", "input")}>記録入力</button>
+            <button type="button" className="link-button" onClick={() => { setView("registration"); window.scrollTo(0, 0); }}>エントリ登録</button>
+            <button type="button" className="link-button" onClick={() => setView("admin")}>大会管理</button>
           </div>
         </section>
       )}
@@ -1059,16 +1125,16 @@ export default function Home() {
           <div className="heat-title">総合順位　最終更新 {state.updatedAt}</div>
           <div className="tablewrap">
             <table className="grid team-grid">
-              <thead><tr><th>順位</th><th>チーム</th><th>基本点</th><th>PB</th><th>合計</th></tr></thead>
-              <tbody>{standings.map((team) => <tr key={team.id} className={hasTeamScores && team.rank === 1 ? "leader-row" : ""}><td>{hasTeamScores ? team.rank : "-"}</td><td className="event">{team.name}</td><td>{team.basePoints}</td><td>{team.pbPoints}</td><td className="scorecol">{team.points}</td></tr>)}</tbody>
+              <thead><tr><th>順位</th><th>チーム</th><th>得点</th></tr></thead>
+              <tbody>{standings.map((team) => <tr key={team.id} className={hasTeamScores && team.rank === 1 ? "leader-row" : ""}><td>{hasTeamScores ? team.rank : "-"}</td><td className="event">{team.name}</td><td className="scorecol">{team.points}</td></tr>)}</tbody>
             </table>
           </div>
           <div className="heat-title">選手別・種目別得点</div>
           <div className="tablewrap">
             <table className="grid athlete-score-grid">
-              <thead><tr><th>競技</th><th>選手</th><th>チーム</th><th>個人順位</th><th>基本</th><th>PB</th><th>計</th></tr></thead>
+              <thead><tr><th>競技</th><th>選手</th><th>チーム</th><th>個人順位</th><th>得点</th></tr></thead>
               <tbody>
-                {athleteScores.length === 0 && <tr><td colSpan={7} className="empty">速報・確定済みの得点はまだありません</td></tr>}
+                {athleteScores.length === 0 && <tr><td colSpan={5} className="empty">速報・確定済みの得点はまだありません</td></tr>}
                 {athleteScores.map((score) => {
                   const event = state.events.find((candidate) => candidate.id === score.eventId)!;
                   const team = state.teams.find((candidate) => candidate.id === score.teamId)!;
@@ -1077,7 +1143,7 @@ export default function Home() {
                     <td className="event">{score.athleteName}</td>
                     <td>{team.shortName}</td>
                     <td>{score.rank === null ? score.status : `${score.rank}位`}</td>
-                    <td>{score.basePoints}</td><td>{score.pbPoints}</td><td className="scorecol">{score.totalPoints}</td>
+                    <td className="scorecol">{score.totalPoints}</td>
                   </tr>;
                 })}
               </tbody>
@@ -1197,77 +1263,73 @@ export default function Home() {
         <section>
           <div className="result-head">
             <div className="event-title">生徒用　当日種目登録　<span className="sync-label">{syncState}</span></div>
-            <div className="storage-note">自分のチームと氏名を選び、出場する個人種目を最大3つ登録してください。全員リレーは選択不要です。</div>
+            <div className="storage-note">競技を選び、1組・2組・3組などの登録枠へ出場する選手の氏名または選手Noを入力してください。全員リレーは選択不要です。</div>
           </div>
           <div className="self-entry-form">
             <div className="self-step">
-              <label htmlFor="self-team">1．チーム</label>
+              <label htmlFor="self-event">1．競技</label>
               <select
-                id="self-team"
+                id="self-event"
                 className="select"
-                value={selfTeamId}
-                onChange={(event) => {
-                  setSelfTeamId(event.target.value);
-                  setSelfAthleteId("");
-                  setSelfAssignments(["", "", ""]);
-                  setSelfReviewing(false);
-                }}
+                value={selfEvent.id}
+                onChange={(event) => chooseSelfEvent(event.target.value)}
               >
-                {state.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-              </select>
-            </div>
-            <div className="self-step">
-              <label htmlFor="self-athlete">2．自分の氏名</label>
-              <select id="self-athlete" className="select" value={selfAthleteId} onChange={(event) => chooseSelfAthlete(event.target.value)}>
-                <option value="">氏名を選択</option>
-                {state.athletes
-                  .filter((athlete) => athlete.teamId === selfTeamId)
-                  .map((athlete) => <option key={athlete.id} value={athlete.id}>No.{athlete.bib}　{athlete.name}</option>)}
+                {state.events.filter((event) => event.id !== "relay").map((event) => (
+                  <option key={event.id} value={event.id}>{event.startTime}　{fullEventName(event)}</option>
+                ))}
               </select>
             </div>
           </div>
+          <datalist id="self-athlete-list">
+            {state.athletes.map((athlete) => (
+              <option key={athlete.id} value={athlete.name}>No.{athlete.bib} {state.teams.find((team) => team.id === athlete.teamId)?.shortName}</option>
+            ))}
+          </datalist>
           <div className="tablewrap">
             <table className="grid self-entry-grid">
-              <thead><tr><th>登録枠</th><th>出場種目</th><th>開始時刻</th></tr></thead>
-              <tbody>{[0, 1, 2].map((slot) => {
-                const event = state.events.find((candidate) => candidate.id === selfAssignments[slot]);
+              <thead><tr><th>登録枠</th><th>氏名</th><th>チーム</th></tr></thead>
+              <tbody>{selfHeats.map((heat) => {
+                const input = currentSelfHeatInputs[heat.id] ?? "";
+                const athlete = findAthleteBySelfInput(state, input);
+                const team = athlete ? state.teams.find((candidate) => candidate.id === athlete.teamId) : undefined;
                 return (
-                  <tr key={slot}>
-                    <td>参加競技{slot + 1}</td>
+                  <tr key={heat.id}>
+                    <td>{heat.number}組</td>
                     <td>
-                      <select
-                        className="assignment-select self-assignment-select"
-                        aria-label={`参加競技${slot + 1}`}
-                        disabled={!selfAthleteId}
-                        value={selfAssignments[slot]}
-                        onChange={(change) => updateSelfAssignment(slot, change.target.value)}
-                      >
-                        <option value="">未選択</option>
-                        {state.events.filter((candidate) => candidate.id !== "relay").map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
-                        ))}
-                      </select>
+                      <input
+                        className="admin-text-field self-name-field"
+                        list="self-athlete-list"
+                        placeholder="氏名またはNo."
+                        aria-label={`${selfEvent.name}${heat.number}組の氏名`}
+                        value={input}
+                        onChange={(change) => updateSelfHeatAssignment(heat.id, change.target.value)}
+                      />
                     </td>
-                    <td>{event?.startTime ?? "－"}</td>
+                    <td>{team?.shortName ?? "－"}</td>
                   </tr>
                 );
               })}</tbody>
             </table>
           </div>
           <div className="input-actions">
-            <button className="darkbtn" disabled={!selfAthleteId} onClick={reviewSelfEntry}>入力内容を確認</button>
+            <button className="darkbtn" onClick={reviewSelfEntry}>入力内容を確認</button>
           </div>
           {selfReviewing && (
             <div className="review-section self-review">
               <div className="heat-title">登録内容の確認</div>
               <div className="tablewrap">
                 <table className="grid review-grid">
-                  <thead><tr><th>チーム</th><th>競技者名</th><th>出場種目</th></tr></thead>
-                  <tbody><tr>
-                    <td>{state.teams.find((team) => team.id === selfTeamId)?.name}</td>
-                    <td>{state.athletes.find((athlete) => athlete.id === selfAthleteId)?.name}</td>
-                    <td className="event">{selfAssignments.filter(Boolean).map((eventId) => state.events.find((event) => event.id === eventId)?.name).join("、")}</td>
-                  </tr></tbody>
+                  <thead><tr><th>競技</th><th>登録枠</th><th>氏名</th></tr></thead>
+                  <tbody>{selfHeats.map((heat) => {
+                    const athlete = findAthleteBySelfInput(state, currentSelfHeatInputs[heat.id] ?? "");
+                    return athlete ? (
+                      <tr key={heat.id}>
+                        <td className="event">{selfEvent.name}</td>
+                        <td>{heat.number}組</td>
+                        <td className="event">{athlete.name}</td>
+                      </tr>
+                    ) : null;
+                  })}</tbody>
                 </table>
               </div>
               <div className="input-actions">

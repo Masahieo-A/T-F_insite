@@ -79,6 +79,82 @@ export function eventIdsForAthlete(state: MeetingState, athleteId: string) {
     .slice(0, 3);
 }
 
+export function heatAthleteAssignmentsForEvent(state: MeetingState, eventId: string) {
+  return Object.fromEntries(
+    state.heats
+      .filter((heat) => heat.eventId === eventId)
+      .map((heat) => {
+        const entry = state.entries
+          .filter((candidate) => candidate.heatId === heat.id)
+          .sort((left, right) => left.laneOrOrder - right.laneOrOrder)[0];
+        return [heat.id, entry?.athleteId ?? ""];
+      }),
+  );
+}
+
+export function applyEventHeatAthleteAssignments(
+  state: MeetingState,
+  eventId: string,
+  assignments: Record<string, string>,
+) {
+  const event = state.events.find((candidate) => candidate.id === eventId);
+  if (!event) throw new Error("種目が見つかりません");
+
+  const eventHeats = state.heats
+    .filter((heat) => heat.eventId === eventId)
+    .sort((left, right) => left.number - right.number);
+  if (!eventHeats.length) throw new Error(`${event.name}: 組がありません`);
+
+  const heatIds = new Set(eventHeats.map((heat) => heat.id));
+  const selected = eventHeats
+    .map((heat) => assignments[heat.id] ?? "")
+    .filter(Boolean);
+  if (new Set(selected).size !== selected.length) {
+    throw new Error("同じ選手を同じ種目の複数組へ登録できません");
+  }
+  const athleteIds = new Set(state.athletes.map((athlete) => athlete.id));
+  const missingAthlete = selected.find((athleteId) => !athleteIds.has(athleteId));
+  if (missingAthlete) throw new Error("存在しない選手が選択されています");
+
+  const previousEventEntries = state.entries.filter((entry) => entry.eventId === eventId);
+  const previousByHeat = new Map(previousEventEntries.map((entry) => [entry.heatId, entry]));
+  const entries = state.entries.filter((entry) => !heatIds.has(entry.heatId));
+  const keptEntryIds = new Set(entries.map((entry) => entry.id));
+
+  for (const athleteId of selected) {
+    const registeredEventCount = new Set([
+      ...entries.filter((entry) => entry.athleteId === athleteId).map((entry) => entry.eventId),
+      eventId,
+    ]).size;
+    if (registeredEventCount > 3) {
+      const athlete = state.athletes.find((candidate) => candidate.id === athleteId)!;
+      throw new Error(`${athlete.name}: 出場種目は最大3つまでです`);
+    }
+  }
+
+  for (const heat of eventHeats) {
+    const athleteId = assignments[heat.id];
+    if (!athleteId) continue;
+    const previous = previousByHeat.get(heat.id);
+    const entry: Entry = {
+      id: previous?.athleteId === athleteId ? previous.id : `entry-self-${eventId}-${heat.number}-${athleteId}`,
+      eventId,
+      heatId: heat.id,
+      athleteId,
+      laneOrOrder: 1,
+      scoringEligible: true,
+    };
+    entries.push(entry);
+    keptEntryIds.add(entry.id);
+  }
+
+  return {
+    ...state,
+    entries,
+    results: state.results.filter((result) => keptEntryIds.has(result.entryId)),
+  };
+}
+
 export function applyAthleteEventAssignments(
   state: MeetingState,
   assignments: Record<string, string[]>,
