@@ -102,7 +102,7 @@ test("フィールドのチーム枠には別チームの選手を登録しな�
   );
 });
 
-test("500mとハードルは3組ずつ用意する", () => {
+test("500mと110mハードルは3組ずつ用意する", () => {
   assert.equal(initialState.heats.filter((heat) => heat.eventId === "500m").length, 3);
   assert.equal(initialState.heats.filter((heat) => heat.eventId === "hurdle").length, 3);
 });

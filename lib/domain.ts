@@ -139,13 +139,13 @@ export const athletes: Athlete[] = athleteRows.map(([name, teamId, sex], index) 
 }));
 
 export const events: Event[] = [
-  { id: "80m", name: "80m", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "13:50", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
+  { id: "80m", name: "100m", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "13:50", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
   { id: "250m", name: "250m（1周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "14:05", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
   { id: "long", name: "走幅跳", category: "共通", kind: "field", discipline: "跳躍", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "編成済み" },
   { id: "high", name: "走高跳", category: "共通", kind: "field", discipline: "跳躍", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "編成済み" },
   { id: "shot", name: "砲丸投", category: "共通", kind: "field", discipline: "投てき", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "編成済み" },
   { id: "500m", name: "500m（250m×2周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "15:45", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
-  { id: "hurdle", name: "ハードル", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:05", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
+  { id: "hurdle", name: "110mハードル", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:05", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
   { id: "1000m", name: "1000m（4周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:25", round: "決　勝", scoringSlots: 3, status: "編成済み" },
   { id: "relay", name: "9×400m 全員リレー", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:50", round: "決　勝", scoringSlots: 1, status: "編成済み" },
 ];

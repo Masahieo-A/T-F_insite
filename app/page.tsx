@@ -84,7 +84,14 @@ function withRequiredHeats(state: MeetingState) {
       });
     }
   }
-  return heats.length === state.heats.length ? state : { ...state, heats };
+  const events = state.events.map((event) => {
+    if (event.id === "80m" && event.name === "80m") return { ...event, name: "100m" };
+    if (event.id === "hurdle" && event.name === "ハードル") return { ...event, name: "110mハードル" };
+    return event;
+  });
+  const changedEvents = events.some((event, index) => event !== state.events[index]);
+  if (heats.length === state.heats.length && !changedEvents) return state;
+  return { ...state, events, heats };
 }
 
 async function openDb() {
@@ -195,7 +202,7 @@ export default function Home() {
     let active = true;
     (async () => {
       const cached = await idbGetState();
-      if (active && cached) setState(cached);
+      if (active && cached) setState(withRequiredHeats(cached));
       try {
         const response = await fetch("/api/state");
         const data = await response.json() as { state?: unknown; source?: string };

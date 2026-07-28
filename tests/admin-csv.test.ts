@@ -16,16 +16,17 @@ test("CSVテンプレートは現在の種目・選手・エントリーを出�
   assert.equal(rows.length, populatedState.entries.length + 1);
   assert.equal(rows[0][0], "種目ID");
   assert.equal(rows[1][0], "80m");
+  assert.equal(rows[1][1], "100m");
   assert.equal(rows[1][5], "101");
   assert.equal(rows[1][6], "冨田 歩佑");
 });
 
 test("CSV一括取込で種目名・開始時刻・出場者を同時更新する", () => {
   const csv = createBulkCsvTemplate(populatedState)
-    .replaceAll("80m,80m,13:50", "80m,短距離80m,13:45")
+    .replaceAll("80m,100m,13:50", "80m,短距離100m,13:45")
     .replace(
-      "80m,短距離80m,13:45,1,1,101,冨田 歩佑",
-      "80m,短距離80m,13:45,1,1,127,青松 政宏",
+      "80m,短距離100m,13:45,1,1,101,冨田 歩佑",
+      "80m,短距離100m,13:45,1,1,127,青松 政宏",
     );
 
   const imported = applyBulkCsv(populatedState, csv);
@@ -35,7 +36,7 @@ test("CSV一括取込で種目名・開始時刻・出場者を同時更新す�
     item.eventId === "80m" && item.heatId === heat.id && item.laneOrOrder === 1)!;
   const athlete = imported.state.athletes.find((item) => item.id === entry.athleteId);
 
-  assert.equal(event?.name, "短距離80m");
+  assert.equal(event?.name, "短距離100m");
   assert.equal(event?.startTime, "13:45");
   assert.equal(athlete?.name, "青松 政宏");
   assert.equal(imported.state.results.some((result) => result.entryId === entry.id), false);
