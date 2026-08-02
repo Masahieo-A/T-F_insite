@@ -157,9 +157,38 @@ button:disabled { cursor: not-allowed; }
   text-align: right;
   font-size: 16px;
 }
-.summary-link a {
+.summary-link a,
+.summary-link .link-button {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   color: #00e;
   text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+.summary-link .lock-again {
+  margin-left: 14px;
+}
+.masked-standing-row td {
+  background: #d7d7d7;
+  color: #555;
+}
+.masked-score {
+  display: block;
+  text-align: center;
+  letter-spacing: .18em;
+}
+.summary-mask-button {
+  border: 2px solid #111;
+  border-radius: 0;
+  background: #f9dfaa;
+  color: #111;
+  padding: 7px 10px;
+  font: inherit;
+  cursor: pointer;
 }
 
 .tablewrap {
@@ -556,7 +585,66 @@ button:disabled { cursor: not-allowed; }
   padding-top: 10px;
   z-index: 8;
 }
+.team-setting-grid th:nth-child(1) { width: 18%; }
+.team-setting-grid th:nth-child(2) { width: 58%; }
+.team-setting-grid th:nth-child(3) { width: 24%; }
+.team-cell {
+  overflow-wrap: anywhere;
+}
 .darkbtn:disabled { background: #bbb; border-color: #999; }
+
+.access-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 48%);
+}
+.access-panel {
+  width: min(420px, 100%);
+  border: 3px solid #111;
+  border-radius: 0;
+  background: #fff;
+  padding: 0 14px 14px;
+}
+.access-title {
+  margin: 0 -14px 12px;
+  padding: 10px 12px;
+  background: var(--thead);
+  color: #fff;
+  font-size: 20px;
+}
+.access-panel p {
+  margin: 8px 0 12px;
+}
+.access-panel label {
+  display: block;
+  margin-bottom: 4px;
+}
+.access-password {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 2px solid #555;
+  border-radius: 0;
+  padding: 6px 8px;
+  font-size: 22px;
+  letter-spacing: .2em;
+}
+.access-error {
+  margin-top: 7px;
+  color: #b00000;
+  font-weight: 700;
+}
+.access-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
 
 .message {
   position: sticky;

@@ -31,12 +31,14 @@ import {
   eventIdsForAthlete,
   eventSlotAssignmentsForEvent,
 } from "@/lib/registration";
+import { isStandingsLocked } from "@/lib/standingsVisibility";
 
 type View = "schedule" | "results" | "team" | "input" | "registration" | "admin";
 type ResultMode = "heats" | "overall";
-type AdminMode = "status" | "athletes" | "entries" | "corrections" | "audit";
+type AdminMode = "teams" | "status" | "athletes" | "entries" | "corrections" | "audit";
 type RegistrationMode = "athletes" | "events" | "assignments";
 type Discipline = "トラック" | "跳躍" | "投てき";
+type ProtectedTarget = "standings" | "team" | "registration" | "admin";
 
 const RESULT_CODES: ResultStatus[] = ["DNS", "DNF", "DQ", "NM"];
 const EVENT_STATUSES: EventStatus[] = ["編成済み", "入力中", "速報", "確定", "訂正中"];
@@ -46,6 +48,12 @@ const DISCIPLINE_FILTERS = [
   { label: "跳躍", value: "跳躍" },
   { label: "投擲", value: "投てき" },
 ] as const;
+const PROTECTED_TARGET_LABELS: Record<ProtectedTarget, string> = {
+  standings: "総合順位の表示",
+  team: "総合順位・得点明細",
+  registration: "エントリ登録",
+  admin: "大会管理",
+};
 
 function currentTime() {
   return new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -203,6 +211,12 @@ export default function Home() {
   const [newEntryHeatId, setNewEntryHeatId] = useState("");
   const [newEntryAthleteId, setNewEntryAthleteId] = useState("");
   const [newEntryLane, setNewEntryLane] = useState("");
+  const [teamDrafts, setTeamDrafts] = useState<Record<string, string>>({});
+  const [teacherAuthenticated, setTeacherAuthenticated] = useState(false);
+  const [accessTarget, setAccessTarget] = useState<ProtectedTarget | null>(null);
+  const [accessPassword, setAccessPassword] = useState("");
+  const [accessError, setAccessError] = useState("");
+  const [accessBusy, setAccessBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -223,6 +237,12 @@ export default function Home() {
         setSyncState("端末保存済み");
       }
     })();
+    fetch("/api/teacher-auth", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { authenticated?: boolean }) => {
+        if (active) setTeacherAuthenticated(Boolean(data.authenticated));
+      })
+      .catch(() => undefined);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     return () => { active = false; };
   }, []);
@@ -255,6 +275,8 @@ export default function Home() {
     [state.teams, transactions],
   );
   const hasTeamScores = transactions.length > 0;
+  const standingsLocked = isStandingsLocked(state);
+  const standingsVisible = !standingsLocked || teacherAuthenticated;
   const athleteScores = useMemo(() => state.events
     .filter((event) => ["速報", "確定"].includes(event.status))
     .flatMap((event) => calculateAthleteEventScores(
@@ -454,6 +476,101 @@ export default function Home() {
     setFieldAttemptDrafts({});
     setInputCodes({});
     setMessage("保存しました");
+  };
+
+  const completeProtectedAction = (target: ProtectedTarget) => {
+    if (target === "team") setView("team");
+    if (target === "registration") setView("registration");
+    if (target === "admin") setView("admin");
+    window.scrollTo(0, 0);
+  };
+
+  const requestTeacherAccess = (target: ProtectedTarget) => {
+    if (teacherAuthenticated) {
+      completeProtectedAction(target);
+      return;
+    }
+    setAccessTarget(target);
+    setAccessPassword("");
+    setAccessError("");
+  };
+
+  const authenticateTeacher = async () => {
+    if (!accessTarget || !accessPassword) return;
+    setAccessBusy(true);
+    setAccessError("");
+    try {
+      const response = await fetch("/api/teacher-auth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: accessPassword }),
+      });
+      if (!response.ok) {
+        setAccessError(response.status === 401 ? "パスワードが違います" : "認証設定を確認してください");
+        return;
+      }
+      const target = accessTarget;
+      setTeacherAuthenticated(true);
+      setAccessTarget(null);
+      setAccessPassword("");
+      completeProtectedAction(target);
+    } catch {
+      setAccessError("認証に失敗しました。通信状態を確認してください");
+    } finally {
+      setAccessBusy(false);
+    }
+  };
+
+  const endTeacherAccess = async () => {
+    await fetch("/api/teacher-auth", { method: "DELETE" }).catch(() => undefined);
+    setTeacherAuthenticated(false);
+    if (["team", "registration", "admin"].includes(view)) setView("schedule");
+    setMessage("教員用表示を終了しました");
+    window.scrollTo(0, 0);
+  };
+
+  const saveTeamDetails = async (teamId: string) => {
+    const team = state.teams.find((candidate) => candidate.id === teamId)!;
+    const name = (teamDrafts[teamId] ?? team.name).trim();
+    if (!name) {
+      setMessage("チーム名を入力してください");
+      return;
+    }
+    if (name.length > 24) {
+      setMessage("チーム名は24文字以内で入力してください");
+      return;
+    }
+    if (state.teams.some((candidate) => candidate.id !== teamId && candidate.name === name)) {
+      setMessage("同じチーム名は登録できません");
+      return;
+    }
+    if (name === team.name) {
+      setMessage("変更内容がありません");
+      return;
+    }
+    const now = currentTime();
+    const next: MeetingState = {
+      ...state,
+      teams: state.teams.map((candidate) => candidate.id === teamId ? { ...candidate, name } : candidate),
+      auditLogs: [{
+        id: crypto.randomUUID(),
+        at: now,
+        actor: "大会管理者",
+        action: "チーム名変更",
+        entity: `チームID ${team.id}`,
+        before: team.name,
+        after: name,
+        reason: "大会管理画面",
+      }, ...state.auditLogs],
+      updatedAt: now,
+    };
+    await persist(next, "チーム名変更", `${team.id}: ${team.name}→${name}`);
+    setTeamDrafts((current) => {
+      const updated = { ...current };
+      delete updated[teamId];
+      return updated;
+    });
+    setMessage(`${team.name}を${name}へ変更しました`);
   };
 
   const changeEventStatus = async (eventId: string, status: EventStatus) => {
@@ -953,7 +1070,7 @@ export default function Home() {
         {view === "schedule" ? (
           <div className="top-actions">
             <button className="goldbtn" onClick={() => setKindFilter("全て")}>競技別表示</button>
-            <button className="goldbtn" onClick={() => setView("team")}>所属別表示</button>
+            <button className="goldbtn" onClick={() => standingsLocked ? requestTeacherAccess("team") : setView("team")}>所属別表示</button>
           </div>
         ) : (
           <button className="topbtn" onClick={() => { setView("schedule"); window.scrollTo(0, 0); }}>
@@ -986,18 +1103,28 @@ export default function Home() {
               </div>
             </div>
             <div className="overall-summary">
-              <div className="summary-heading">総合順位 <span>{hasTeamScores ? "速報・確定済み種目から自動計算" : "結果入力後に自動計算"}</span></div>
+              <div className="summary-heading">総合順位 <span>{standingsVisible
+                ? hasTeamScores ? "速報・確定済み種目から自動計算" : "結果入力後に自動計算"
+                : "結果発表まで非公開"}</span></div>
               <table className="grid summary-grid">
                 <thead><tr><th>順位</th><th>チーム</th><th>得点</th></tr></thead>
                 <tbody>{standings.map((team) => (
-                  <tr key={team.id} className={hasTeamScores && team.rank === 1 ? "leader-row" : ""}>
-                    <td>{hasTeamScores ? `${team.rank}位` : "-"}</td>
-                    <td className="event">{team.name}{hasTeamScores && team.rank === 1 && <span className="leader-label"> 暫定1位</span>}</td>
-                    <td className="scorecol">{team.points}</td>
+                  <tr key={team.id} className={standingsVisible && hasTeamScores && team.rank === 1 ? "leader-row" : !standingsVisible ? "masked-standing-row" : ""}>
+                    <td>{standingsVisible ? hasTeamScores ? `${team.rank}位` : "-" : "—"}</td>
+                    <td className="event">{standingsVisible
+                      ? <>{team.name}{hasTeamScores && team.rank === 1 && <span className="leader-label"> 暫定1位</span>}</>
+                      : <span className="masked-score">非公開</span>}</td>
+                    <td className="scorecol">{standingsVisible ? team.points : "—"}</td>
                   </tr>
                 ))}</tbody>
               </table>
-              <div className="summary-link"><a href="#" onClick={(event) => { event.preventDefault(); setView("team"); window.scrollTo(0, 0); }}>選手別・種目別の得点を見る</a></div>
+              <div className="summary-link">{standingsVisible
+                ? <>
+                  <button type="button" className="link-button" onClick={() => standingsLocked ? requestTeacherAccess("team") : setView("team")}>選手別・種目別の得点を見る</button>
+                  {standingsLocked && teacherAuthenticated && <button type="button" className="link-button lock-again" onClick={endTeacherAccess}>非公開表示へ戻す</button>}
+                </>
+                : <button type="button" className="summary-mask-button" onClick={() => requestTeacherAccess("standings")}>教員用に表示（パスワード）</button>}
+              </div>
             </div>
           </div>
           <div className="tablewrap schedule-wrap">
@@ -1023,8 +1150,9 @@ export default function Home() {
           </div>
           <div className="staff-links">
             <button type="button" className="link-button" onClick={() => openEvent("80m", "input")}>記録入力</button>
-            <button type="button" className="link-button" onClick={() => { setView("registration"); window.scrollTo(0, 0); }}>エントリ登録</button>
-            <button type="button" className="link-button" onClick={() => setView("admin")}>大会管理</button>
+            <button type="button" className="link-button" onClick={() => requestTeacherAccess("registration")}>エントリ登録</button>
+            <button type="button" className="link-button" onClick={() => requestTeacherAccess("admin")}>大会管理</button>
+            {teacherAuthenticated && <button type="button" className="link-button" onClick={endTeacherAccess}>教員用表示を終了</button>}
           </div>
         </section>
       )}
@@ -1106,7 +1234,7 @@ export default function Home() {
                   return <tr key={score.entryId} className={score.rank === null ? "dns" : ""}>
                     <td className="event">{event.name}</td>
                     <td className="event">{score.athleteName}</td>
-                    <td>{team.shortName}</td>
+                    <td>{team.name}</td>
                     <td>{score.rank === null ? score.status : `${score.rank}位`}</td>
                     <td className="scorecol">{score.totalPoints}</td>
                   </tr>;
@@ -1190,7 +1318,7 @@ export default function Home() {
                 const currentBest = bestPerformance(currentAttempts, selectedEvent) ?? existing?.value ?? null;
                 return (
                   <tr key={slot.id} className={inputCodes[slot.id] ? "dns" : ""}>
-                    <td className="team-cell">{team.shortName}</td>
+                    <td className="team-cell">{team.name}</td>
                     {!isRelayInput && <td>
                       <select
                         className="input-athlete-select"
@@ -1292,7 +1420,8 @@ export default function Home() {
                           || (existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : existing?.status))
                       || "未入力";
                     const changed = Boolean(inputCodes[slot.id] || inputDrafts[slot.id] || attemptRaws.some(Boolean));
-                    return <tr key={slot.id}><td>{slot.teamId}</td>{!isRelayInput && <td>{athlete.name}</td>}<td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
+                    const team = state.teams.find((candidate) => candidate.id === slot.teamId)!;
+                    return <tr key={slot.id}><td>{team.name}</td>{!isRelayInput && <td>{athlete.name}</td>}<td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
                   })}</tbody>
                 </table>
               </div>
@@ -1421,10 +1550,33 @@ export default function Home() {
             <div className="event-title">管理者画面</div>
             <div className="subseg admin-seg">
               {([
-                ["status", "競技管理"], ["athletes", "選手登録"], ["entries", "エントリー編集"], ["corrections", "記録修正"], ["audit", "監査ログ"],
+                ["teams", "チーム設定"], ["status", "競技管理"], ["athletes", "選手登録"], ["entries", "エントリー編集"], ["corrections", "記録修正"], ["audit", "監査ログ"],
               ] as const).map(([key, label]) => <button key={key} className={adminMode === key ? "active" : ""} onClick={() => setAdminMode(key)}>{label}</button>)}
             </div>
           </div>
+
+          {adminMode === "teams" && <>
+            <div className="admin-note">管理ID（A・B・C）は変更せず、表示するチーム名だけを変更します。保存後は全画面とGoogleスプレッドシート保存データへ反映されます。</div>
+            <div className="tablewrap">
+              <table className="grid team-setting-grid">
+                <thead><tr><th>管理ID</th><th>チーム名</th><th>保存</th></tr></thead>
+                <tbody>{state.teams
+                  .slice()
+                  .sort((left, right) => left.displayOrder - right.displayOrder)
+                  .map((team) => <tr key={team.id}>
+                    <td>{team.id}</td>
+                    <td><input
+                      className="admin-text-field"
+                      aria-label={`${team.id}のチーム名`}
+                      maxLength={24}
+                      value={teamDrafts[team.id] ?? team.name}
+                      onChange={(change) => setTeamDrafts((current) => ({ ...current, [team.id]: change.target.value }))}
+                    /></td>
+                    <td><button className="row-save-button" onClick={() => saveTeamDetails(team.id)}>保存</button></td>
+                  </tr>)}</tbody>
+              </table>
+            </div>
+          </>}
 
           {adminMode === "status" && <>
             <div className="admin-note">種目名・開始時刻を入力して行ごとに保存できます。状態変更は選択時に即時反映されます。</div>
@@ -1577,6 +1729,32 @@ export default function Home() {
         </section>
       )}
 
+      {accessTarget && <div className="access-backdrop" role="presentation">
+        <form className="access-panel" role="dialog" aria-modal="true" aria-labelledby="teacher-access-title" onSubmit={(event) => { event.preventDefault(); authenticateTeacher(); }}>
+          <div id="teacher-access-title" className="access-title">教員用パスワード</div>
+          <p>{PROTECTED_TARGET_LABELS[accessTarget]}を開きます。</p>
+          <label htmlFor="teacher-password">パスワード</label>
+          <input
+            id="teacher-password"
+            className="access-password"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="current-password"
+            autoFocus
+            value={accessPassword}
+            onChange={(event) => {
+              setAccessPassword(event.target.value.replace(/\D/g, ""));
+              setAccessError("");
+            }}
+          />
+          {accessError && <div className="access-error" role="alert">{accessError}</div>}
+          <div className="access-actions">
+            <button type="button" className="mutedbtn" onClick={() => { setAccessTarget(null); setAccessPassword(""); setAccessError(""); }}>キャンセル</button>
+            <button type="submit" className="darkbtn" disabled={accessBusy || !accessPassword}>{accessBusy ? "確認中" : "表示する"}</button>
+          </div>
+        </form>
+      </div>}
       {message && <div className="message" role="status"><span>{message}</span><button onClick={() => setMessage("")}>閉じる</button></div>}
     </div>
   );

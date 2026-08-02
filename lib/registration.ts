@@ -106,7 +106,7 @@ export function eventRegistrationSlots(state: MeetingState, eventId: string): Ev
       .flatMap((team, teamIndex) =>
         [1, 2, 3, 4, 5].map((slotNumber) => ({
           id: `${eventId}-${team.id}-slot-${slotNumber}`,
-          label: `${team.shortName}チーム ${slotNumber}人目`,
+          label: `${team.name} ${slotNumber}人目`,
           heatId: heat.id,
           laneOrOrder: teamIndex * 5 + slotNumber,
           teamId: team.id,
@@ -118,7 +118,7 @@ export function eventRegistrationSlots(state: MeetingState, eventId: string): Ev
     .sort((left, right) => left.displayOrder - right.displayOrder)
     .map((team, teamIndex) => ({
       id: `${eventId}-${heat.id}-${team.id}`,
-      label: `${heat.number}組 ${team.shortName}チーム`,
+      label: `${heat.number}組 ${team.name}`,
       heatId: heat.id,
       laneOrOrder: teamIndex + 1,
       teamId: team.id,
