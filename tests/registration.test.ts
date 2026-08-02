@@ -9,7 +9,6 @@ import {
   eventRegistrationSlots,
   eventIdsForAthlete,
   eventSlotAssignmentsForEvent,
-  heatAthleteAssignmentsForEvent,
 } from "../lib/registration.ts";
 import { initialState } from "../lib/domain.ts";
 
@@ -40,52 +39,65 @@ test("同じ参加種目の重複選択は保存しない", () => {
   );
 });
 
-test("当日種目登録は種目ごとの組へ選手を配置する", () => {
-  const heats = initialState.heats.filter((heat) => heat.eventId === "80m");
-  const next = applyEventHeatAthleteAssignments(initialState, "80m", {
-    [heats[0].id]: initialState.athletes[0].id,
-    [heats[1].id]: initialState.athletes[1].id,
-    [heats[2].id]: initialState.athletes[2].id,
+test("5組の各組にA・B・Cチーム1名ずつの入力枠を用意する", () => {
+  const slots = eventRegistrationSlots(initialState, "80m");
+  const firstHeatSlots = slots.filter((slot) => slot.heatId === "80m-heat-1");
+
+  assert.equal(slots.length, 15);
+  assert.equal(new Set(slots.map((slot) => slot.heatId)).size, 5);
+  assert.deepEqual(firstHeatSlots.map((slot) => slot.teamId), ["A", "B", "C"]);
+  assert.deepEqual(firstHeatSlots.map((slot) => slot.laneOrOrder), [1, 2, 3]);
+});
+
+test("記録入力で別組を登録しても保存済みの組を残す", () => {
+  const slots = eventRegistrationSlots(initialState, "250m");
+  const firstHeatSlots = slots.filter((slot) => slot.heatId === "250m-heat-1");
+  const secondHeatSlots = slots.filter((slot) => slot.heatId === "250m-heat-2");
+  const teamAthletes = Object.fromEntries(initialState.teams.map((team) => [
+    team.id,
+    initialState.athletes.filter((athlete) => athlete.teamId === team.id),
+  ]));
+  const firstAssignments = Object.fromEntries(firstHeatSlots.map((slot) => [
+    slot.id,
+    teamAthletes[slot.teamId][0].id,
+  ]));
+  const first = applyEventSlotAthleteAssignments(initialState, "250m", firstAssignments);
+  const saved = eventSlotAssignmentsForEvent(first, "250m");
+  const second = applyEventSlotAthleteAssignments(first, "250m", {
+    ...saved,
+    ...Object.fromEntries(secondHeatSlots.map((slot) => [slot.id, teamAthletes[slot.teamId][1].id])),
   });
 
-  assert.deepEqual(heatAthleteAssignmentsForEvent(next, "80m"), {
-    [heats[0].id]: initialState.athletes[0].id,
-    [heats[1].id]: initialState.athletes[1].id,
-    [heats[2].id]: initialState.athletes[2].id,
-  });
-  assert.deepEqual(
-    next.entries
-      .filter((entry) => entry.eventId === "80m")
-      .map((entry) => entry.laneOrOrder),
-    [1, 1, 1],
-  );
+  assert.equal(second.entries.filter((entry) => entry.eventId === "250m").length, 6);
+  assert.equal(second.entries.filter((entry) => entry.heatId === "250m-heat-1").length, 3);
+  assert.equal(second.entries.filter((entry) => entry.heatId === "250m-heat-2").length, 3);
 });
 
 test("同じ選手を同じ種目の複数枠へ登録しない", () => {
-  const heats = initialState.heats.filter((heat) => heat.eventId === "80m");
+  const slots = eventRegistrationSlots(initialState, "80m").filter((slot) => slot.teamId === "A");
   assert.throws(
     () => applyEventHeatAthleteAssignments(initialState, "80m", {
-      [heats[0].id]: initialState.athletes[0].id,
-      [heats[1].id]: initialState.athletes[0].id,
+      [slots[0].id]: initialState.athletes[0].id,
+      [slots[1].id]: initialState.athletes[0].id,
     }),
     /複数枠/,
   );
 });
 
-test("フィールド3種目は1組決勝のまま各チーム3枠を用意する", () => {
+test("フィールド3種目は1組決勝のまま各チーム5枠を用意する", () => {
   const slots = eventRegistrationSlots(initialState, "long");
   const selectedAthletes = slots.map((slot) =>
-    initialState.athletes.filter((athlete) => athlete.teamId === slot.teamId)[slot.laneOrOrder % 3],
+    initialState.athletes.filter((athlete) => athlete.teamId === slot.teamId)[slot.slotNumber - 1],
   );
   const next = applyEventSlotAthleteAssignments(initialState, "long", Object.fromEntries(
     slots.map((slot, index) => [slot.id, selectedAthletes[index].id]),
   ));
   const entries = next.entries.filter((entry) => entry.eventId === "long");
 
-  assert.equal(slots.length, 9);
+  assert.equal(slots.length, 15);
   assert.equal(new Set(slots.map((slot) => slot.heatId)).size, 1);
-  assert.deepEqual(slots.map((slot) => slot.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  assert.deepEqual(entries.map((entry) => entry.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(slots.map((slot) => slot.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  assert.deepEqual(entries.map((entry) => entry.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   assert.deepEqual(eventSlotAssignmentsForEvent(next, "long"), Object.fromEntries(
     slots.map((slot, index) => [slot.id, selectedAthletes[index].id]),
   ));
@@ -102,7 +114,10 @@ test("フィールドのチーム枠には別チームの選手を登録しな�
   );
 });
 
-test("500mと110mハードルは3組ずつ用意する", () => {
-  assert.equal(initialState.heats.filter((heat) => heat.eventId === "500m").length, 3);
-  assert.equal(initialState.heats.filter((heat) => heat.eventId === "hurdle").length, 3);
+test("フィールド・1000m・リレー以外は5組ずつ用意する", () => {
+  for (const eventId of ["80m", "250m", "500m", "hurdle"]) {
+    assert.equal(initialState.heats.filter((heat) => heat.eventId === eventId).length, 5);
+  }
+  assert.equal(initialState.heats.filter((heat) => heat.eventId === "1000m").length, 1);
+  assert.equal(initialState.heats.filter((heat) => heat.eventId === "relay").length, 1);
 });

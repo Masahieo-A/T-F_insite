@@ -184,10 +184,6 @@ button:disabled { cursor: not-allowed; }
   font: inherit;
   cursor: pointer;
 }
-.staff-links .student-entry-link {
-  font-weight: 700;
-  font-size: 16px;
-}
 .grid {
   width: 100%;
   min-width: 0;
@@ -300,11 +296,30 @@ button:disabled { cursor: not-allowed; }
   gap: 12px;
   flex-wrap: wrap;
 }
-.input-grid th:nth-child(1) { width: 9%; }
-.input-grid th:nth-child(2) { width: 12%; }
-.input-grid th:nth-child(3) { width: 29%; }
-.input-grid th:nth-child(4) { width: 25%; }
-.input-grid th:nth-child(5) { width: 25%; }
+.track-input-grid th:nth-child(1) { width: 12%; }
+.track-input-grid th:nth-child(2) { width: 38%; }
+.track-input-grid th:nth-child(3) { width: 25%; }
+.track-input-grid th:nth-child(4) { width: 25%; }
+.field-input-grid th:nth-child(1) { width: 7%; }
+.field-input-grid th:nth-child(2) { width: 22%; }
+.field-input-grid th:nth-child(3),
+.field-input-grid th:nth-child(4),
+.field-input-grid th:nth-child(5) { width: 12%; }
+.field-input-grid th:nth-child(6) { width: 10%; }
+.field-input-grid th:nth-child(7) { width: 25%; }
+.input-athlete-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 2px solid #333;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font-size: 16px;
+}
+.team-cell { font-weight: 700; }
+.best-field { font-weight: 700; white-space: nowrap; }
+.input-guide { padding-top: 9px; }
 .record-field {
   width: calc(100% - 25px);
   min-height: 44px;
@@ -537,32 +552,6 @@ button:disabled { cursor: not-allowed; }
   padding-top: 10px;
   z-index: 8;
 }
-.self-entry-form {
-  margin: 0 10px 16px;
-  padding: 12px;
-  border: 2px solid var(--line);
-  background: var(--stripe);
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 12px;
-}
-.self-step {
-  display: grid;
-  gap: 5px;
-}
-.self-step label { font-weight: 700; }
-.self-step .select { width: 100%; color: #111; }
-.self-entry-grid th:nth-child(1) { width: 25%; }
-.self-entry-grid th:nth-child(2) { width: 52%; }
-.self-entry-grid th:nth-child(3) { width: 23%; }
-.self-name-field {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 46px;
-  border: 2px solid #333;
-  font-size: 17px;
-}
-.self-review { margin-top: 4px; }
 .darkbtn:disabled { background: #bbb; border-color: #999; }
 
 .message {
@@ -615,7 +604,6 @@ button:disabled { cursor: not-allowed; }
     gap: 8px;
     font-size: 12px;
   }
-  .staff-links .student-entry-link { font-size: 14px; }
   .grid { font-size: 15px; }
   .grid th, .grid td { padding: 6px 4px; }
   .schedule-grid th:nth-child(1) { width: 13%; }
@@ -639,7 +627,14 @@ button:disabled { cursor: not-allowed; }
   .note { padding: 12px 6px; font-size: 15px; }
   .result-grid th { font-size: 14px; }
   .input-selects { gap: 7px; }
+  .input-athlete-select { min-height: 40px; font-size: 13px; }
   .record-field { width: calc(100% - 18px); min-height: 38px; padding: 3px; font-size: 15px; }
+  .field-input-grid { font-size: 10px; }
+  .field-input-grid th, .field-input-grid td { padding: 4px 2px; }
+  .field-input-grid .input-athlete-select { min-height: 36px; font-size: 10px; border-width: 1px; }
+  .field-input-grid .record-field { width: 100%; min-height: 34px; padding: 2px; font-size: 12px; box-sizing: border-box; border-width: 1px; }
+  .field-input-grid .code-row { gap: 1px; }
+  .field-input-grid .code-row button { min-height: 24px; font-size: 8px; }
   .unit { font-size: 11px; }
   .code-row { grid-template-columns: repeat(2, 1fr); }
   .code-row button { min-height: 27px; font-size: 10px; }
@@ -678,15 +673,6 @@ button:disabled { cursor: not-allowed; }
   .assignment-grid th, .assignment-grid td { padding: 4px 2px; }
   .assignment-grid .kana { font-size: 9px; }
   .assignment-select { min-height: 32px; padding: 1px; font-size: 10px; }
-  .self-entry-form {
-    margin: 0 5px 12px;
-    padding: 9px;
-    grid-template-columns: 1fr;
-    gap: 9px;
-  }
-  .self-step .select { font-size: 16px; min-height: 44px; }
-  .self-entry-grid { font-size: 14px; }
-  .self-name-field { min-height: 44px; font-size: 15px; padding: 4px; }
   .athlete-registration-grid, .event-registration-grid { font-size: 12px; }
 }
 

@@ -88,6 +88,15 @@ export function comparePerformance(a: number, b: number, event: Pick<Event, "dir
   return event.direction === "asc" ? a - b : b - a;
 }
 
+export function bestPerformance(
+  attempts: Array<number | null>,
+  event: Pick<Event, "direction">,
+): number | null {
+  const valid = attempts.filter((value): value is number => value !== null);
+  if (!valid.length) return null;
+  return event.direction === "asc" ? Math.min(...valid) : Math.max(...valid);
+}
+
 export function isSamePerformance(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.000001;
 }

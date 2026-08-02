@@ -14,6 +14,7 @@ import {
   calculateAthleteEventScores,
   calculateEventScoreTransactions,
   calculateOverallStandings,
+  bestPerformance,
   formatPerformance,
   normalizePerformance,
   rankResults,
@@ -31,7 +32,7 @@ import {
   eventSlotAssignmentsForEvent,
 } from "@/lib/registration";
 
-type View = "schedule" | "results" | "team" | "input" | "selfEntry" | "registration" | "admin";
+type View = "schedule" | "results" | "team" | "input" | "registration" | "admin";
 type ResultMode = "heats" | "overall";
 type AdminMode = "status" | "athletes" | "entries" | "corrections" | "audit";
 type RegistrationMode = "athletes" | "events" | "assignments";
@@ -71,7 +72,7 @@ function isMeetingState(value: unknown): value is MeetingState {
 }
 
 function withRequiredHeats(state: MeetingState) {
-  const requiredCounts: Record<string, number> = { "500m": 3, hurdle: 3 };
+  const requiredCounts: Record<string, number> = { "80m": 5, "250m": 5, "500m": 5, hurdle: 5 };
   const heats = [...state.heats];
   for (const [eventId, count] of Object.entries(requiredCounts)) {
     for (let number = 1; number <= count; number += 1) {
@@ -84,13 +85,20 @@ function withRequiredHeats(state: MeetingState) {
       });
     }
   }
+  const eventOrder = new Map(state.events.map((event, index) => [event.id, index]));
+  heats.sort((left, right) =>
+    (eventOrder.get(left.eventId) ?? Number.MAX_SAFE_INTEGER)
+      - (eventOrder.get(right.eventId) ?? Number.MAX_SAFE_INTEGER)
+    || left.number - right.number);
   const events = state.events.map((event) => {
     if (event.id === "80m" && event.name === "80m") return { ...event, name: "100m" };
     if (event.id === "hurdle" && event.name === "ハードル") return { ...event, name: "110mハードル" };
     return event;
   });
   const changedEvents = events.some((event, index) => event !== state.events[index]);
-  if (heats.length === state.heats.length && !changedEvents) return state;
+  const changedHeats = heats.length !== state.heats.length
+    || heats.some((heat, index) => heat.id !== state.heats[index]?.id);
+  if (!changedHeats && !changedEvents) return state;
   return { ...state, events, heats };
 }
 
@@ -175,7 +183,9 @@ export default function Home() {
   const [selectedHeatId, setSelectedHeatId] = useState("80m-heat-1");
   const [resultOrder, setResultOrder] = useState<"lane" | "rank">("rank");
   const [resultMode, setResultMode] = useState<ResultMode>("heats");
+  const [inputAthletes, setInputAthletes] = useState<Record<string, string>>({});
   const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [fieldAttemptDrafts, setFieldAttemptDrafts] = useState<Record<string, string[]>>({});
   const [inputCodes, setInputCodes] = useState<Record<string, ResultStatus>>({});
   const [reviewing, setReviewing] = useState(false);
   const [syncState, setSyncState] = useState<"同期済み" | "DB同期済み" | "端末保存済み" | "同期中">("同期済み");
@@ -190,9 +200,6 @@ export default function Home() {
   const [newAthleteName, setNewAthleteName] = useState("");
   const [newAthleteSex, setNewAthleteSex] = useState<"男子" | "女子">("男子");
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({});
-  const [selfEventId, setSelfEventId] = useState("80m");
-  const [selfHeatAssignments, setSelfHeatAssignments] = useState<Record<string, string>>({});
-  const [selfReviewing, setSelfReviewing] = useState(false);
   const [newEntryHeatId, setNewEntryHeatId] = useState("");
   const [newEntryAthleteId, setNewEntryAthleteId] = useState("");
   const [newEntryLane, setNewEntryLane] = useState("");
@@ -223,21 +230,15 @@ export default function Home() {
   const selectedEvent = state.events.find((event) => event.id === selectedEventId) ?? state.events[0];
   const selectedHeats = state.heats.filter((heat) => heat.eventId === selectedEvent.id);
   const selectedHeat = selectedHeats.find((heat) => heat.id === selectedHeatId) ?? selectedHeats[0];
-  const selfEvent = state.events.find((event) => event.id === selfEventId && event.id !== "relay")
-    ?? state.events.find((event) => event.id !== "relay")
-    ?? state.events[0];
-  const selfSlots = eventRegistrationSlots(state, selfEvent.id);
-  const savedSelfHeatAssignments = eventSlotAssignmentsForEvent(state, selfEvent.id);
-  const currentSelfHeatInputs = Object.fromEntries(
-    selfSlots.map((slot) => {
-      const savedAthlete = state.athletes.find((athlete) => athlete.id === savedSelfHeatAssignments[slot.id]);
-      return [slot.id, selfHeatAssignments[slot.id] ?? savedAthlete?.name ?? ""];
-    }),
-  );
-  const heatEntries = state.entries.filter((entry) => entry.heatId === selectedHeat?.id);
+  const inputSlots = eventRegistrationSlots(state, selectedEvent.id)
+    .filter((slot) => slot.heatId === selectedHeat?.id);
+  const savedInputAthletes = eventSlotAssignmentsForEvent(state, selectedEvent.id);
+  const isFieldInput = selectedEvent.kind === "field";
   const eventEntries = state.entries.filter((entry) => entry.eventId === selectedEvent.id);
-  const inputChangeCount = heatEntries.filter((entry) =>
-    Boolean(inputCodes[entry.id] || inputDrafts[entry.id])).length;
+  const inputChangeCount = inputSlots.filter((slot) =>
+    Boolean(inputCodes[slot.id]
+      || inputDrafts[slot.id]
+      || fieldAttemptDrafts[slot.id]?.some(Boolean))).length;
 
   const transactions = useMemo(() => state.events
     .filter((event) => ["速報", "確定"].includes(event.status))
@@ -297,6 +298,10 @@ export default function Home() {
     setNewEntryLane("");
     setResultMode("heats");
     setReviewing(false);
+    setInputAthletes({});
+    setInputDrafts({});
+    setFieldAttemptDrafts({});
+    setInputCodes({});
     setView(nextView);
     window.scrollTo(0, 0);
   };
@@ -316,14 +321,93 @@ export default function Home() {
     }
   };
 
+  const updateFieldAttempt = (slotId: string, attemptIndex: number, raw: string) => {
+    const clean = sanitizeNumericInput(raw);
+    setFieldAttemptDrafts((current) => {
+      const attempts = [...(current[slotId] ?? ["", "", ""] )];
+      attempts[attemptIndex] = clean;
+      return { ...current, [slotId]: attempts };
+    });
+    setInputCodes((current) => {
+      const next = { ...current };
+      delete next[slotId];
+      return next;
+    });
+    setReviewing(false);
+  };
+
+  const inputAthleteId = (slotId: string) => inputAthletes[slotId] ?? savedInputAthletes[slotId] ?? "";
+
+  const inputEntry = (slotId: string) => {
+    const slot = inputSlots.find((candidate) => candidate.id === slotId);
+    const athleteId = inputAthleteId(slotId);
+    if (!slot || !athleteId) return undefined;
+    return state.entries.find((entry) =>
+      entry.eventId === selectedEvent.id
+      && entry.heatId === slot.heatId
+      && entry.athleteId === athleteId);
+  };
+
+  const reviewInput = () => {
+    if (!inputChangeCount) {
+      setMessage("記録またはDNS・DNF・DQ・NMを1件以上入力してください");
+      return;
+    }
+    const changedSlots = inputSlots.filter((slot) =>
+      inputCodes[slot.id] || inputDrafts[slot.id] || fieldAttemptDrafts[slot.id]?.some(Boolean));
+    if (changedSlots.some((slot) => !inputAthleteId(slot.id))) {
+      setMessage("記録を入力した行の選手を選択してください");
+      return;
+    }
+    const selected = inputSlots.map((slot) => inputAthleteId(slot.id)).filter(Boolean);
+    if (new Set(selected).size !== selected.length) {
+      setMessage("同じ選手を同じ種目の複数枠へ登録できません");
+      return;
+    }
+    if (isFieldInput && changedSlots.some((slot) =>
+      !inputCodes[slot.id] && !fieldAttemptDrafts[slot.id]?.some(Boolean))) {
+      setMessage("フィールド種目は試技記録または状態を入力してください");
+      return;
+    }
+    setReviewing(true);
+  };
+
   const saveProvisional = async () => {
-    const nextResults = [...state.results];
-    heatEntries.forEach((entry) => {
+    if (!selectedHeat) return;
+    const assignments = { ...savedInputAthletes };
+    for (const slot of inputSlots) assignments[slot.id] = inputAthleteId(slot.id);
+    let assigned: MeetingState;
+    try {
+      assigned = applyEventSlotAthleteAssignments(state, selectedEvent.id, assignments);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "選手登録に失敗しました");
+      return;
+    }
+    const nextResults = [...assigned.results];
+    inputSlots.forEach((slot) => {
+      const athleteId = assignments[slot.id];
+      const entry = assigned.entries.find((candidate) =>
+        candidate.eventId === selectedEvent.id
+        && candidate.heatId === slot.heatId
+        && candidate.laneOrOrder === slot.laneOrOrder
+        && candidate.athleteId === athleteId);
+      if (!entry) return;
       const existingIndex = nextResults.findIndex((result) => result.entryId === entry.id);
-      const code = inputCodes[entry.id];
-      const raw = inputDrafts[entry.id];
-      if (!code && !raw) return;
-      const value = code ? null : normalizePerformance(raw, selectedEvent);
+      const previousResult = existingIndex >= 0 ? nextResults[existingIndex] : undefined;
+      const code = inputCodes[slot.id];
+      const raw = inputDrafts[slot.id];
+      const attemptRaws = fieldAttemptDrafts[slot.id] ?? [];
+      if (!code && !raw && !attemptRaws.some(Boolean)) return;
+      const attempts = isFieldInput
+        ? [0, 1, 2].map((index) => attemptRaws[index]
+          ? normalizePerformance(attemptRaws[index], selectedEvent)
+          : previousResult?.attempts?.[index] ?? null)
+        : undefined;
+      const value = code
+        ? null
+        : isFieldInput
+          ? bestPerformance(attempts ?? [], selectedEvent)
+          : normalizePerformance(raw, selectedEvent);
       const result: Result = {
         id: existingIndex >= 0 ? nextResults[existingIndex].id : `result-${entry.id}`,
         entryId: entry.id,
@@ -332,15 +416,16 @@ export default function Home() {
         status: code ?? "OK",
         provisional: true,
         isPersonalBest: false,
+        attempts,
       };
       if (existingIndex >= 0) nextResults[existingIndex] = result;
       else nextResults.push(result);
     });
     const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const next: MeetingState = {
-      ...state,
+      ...assigned,
       results: nextResults,
-      events: state.events.map((event) => event.id === selectedEvent.id ? { ...event, status: "速報" } : event),
+      events: assigned.events.map((event) => event.id === selectedEvent.id ? { ...event, status: "速報" } : event),
       auditLogs: [{
         id: crypto.randomUUID(),
         at: now,
@@ -350,17 +435,15 @@ export default function Home() {
         before: "入力中",
         after: "速報",
         reason: "入力内容確認済み",
-      }, ...state.auditLogs],
+      }, ...assigned.auditLogs],
       updatedAt: now,
     };
     await persist(next, "速報保存", `${selectedEvent.name} ${selectedHeat.number}組`);
     setReviewing(false);
-    setInputDrafts((current) => Object.fromEntries(
-      Object.entries(current).filter(([entryId]) => !heatEntries.some((entry) => entry.id === entryId)),
-    ));
-    setInputCodes((current) => Object.fromEntries(
-      Object.entries(current).filter(([entryId]) => !heatEntries.some((entry) => entry.id === entryId)),
-    ) as Record<string, ResultStatus>);
+    setInputAthletes({});
+    setInputDrafts({});
+    setFieldAttemptDrafts({});
+    setInputCodes({});
     setMessage("速報を保存しました");
   };
 
@@ -710,111 +793,6 @@ export default function Home() {
     }
   };
 
-  const chooseSelfEvent = (eventId: string) => {
-    setSelfEventId(eventId);
-    setSelfHeatAssignments({});
-    setSelfReviewing(false);
-  };
-
-  const updateSelfHeatAssignment = (slotId: string, athleteId: string) => {
-    setSelfHeatAssignments((current) => ({ ...current, [slotId]: athleteId }));
-    setSelfReviewing(false);
-  };
-
-  const resolveSelfHeatAssignments = (sourceState: MeetingState, eventId: string) => {
-    const sourceSlots = eventRegistrationSlots(sourceState, eventId);
-    const sourceSaved = eventSlotAssignmentsForEvent(sourceState, eventId);
-    const assignments: Record<string, string> = {};
-    for (const slot of sourceSlots) {
-      const athleteId = selfHeatAssignments[slot.id] ?? sourceSaved[slot.id] ?? "";
-      if (!athleteId) {
-        assignments[slot.id] = "";
-        continue;
-      }
-      const athlete = sourceState.athletes.find((candidate) => candidate.id === athleteId);
-      if (!athlete) throw new Error(`${slot.label}: 選手登録にない選手です`);
-      if (slot.teamId && athlete.teamId !== slot.teamId) {
-        const team = sourceState.teams.find((candidate) => candidate.id === slot.teamId);
-        throw new Error(`${slot.label}: ${athlete.name}は${team?.name ?? slot.teamId}の選手ではありません`);
-      }
-      assignments[slot.id] = athlete.id;
-    }
-    return assignments;
-  };
-
-  const reviewSelfEntry = () => {
-    try {
-      const selected = Object.values(resolveSelfHeatAssignments(state, selfEvent.id)).filter(Boolean);
-      if (selected.length === 0) {
-        setMessage("登録する選手を1名以上入力してください");
-        return;
-      }
-      if (new Set(selected).size !== selected.length) {
-        setMessage("同じ選手を複数の枠へ登録できません");
-        return;
-      }
-      setSelfReviewing(true);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "種目登録の確認に失敗しました");
-    }
-  };
-
-  const saveSelfEntry = async () => {
-    let latestState = state;
-    try {
-      const response = await fetch("/api/state", { cache: "no-store" });
-      const data = await response.json() as { state?: unknown };
-      if (isMeetingState(data.state)) latestState = withRequiredHeats(data.state);
-    } catch {
-      // 通信断時は端末上の最新状態を使い、persist側のオフラインキューへ渡す。
-    }
-    const event = latestState.events.find((candidate) => candidate.id === selfEvent.id);
-    if (!event) return;
-    try {
-      const latestSlots = eventRegistrationSlots(latestState, event.id);
-      const latestSavedAssignments = eventSlotAssignmentsForEvent(latestState, event.id);
-      const assignments = resolveSelfHeatAssignments(latestState, event.id);
-      const assigned = applyEventSlotAthleteAssignments(latestState, event.id, assignments);
-      const now = currentTime();
-      const beforeNames = latestSlots
-        .map((slot) => {
-          const athleteId = latestSavedAssignments[slot.id];
-          const athlete = latestState.athletes.find((candidate) => candidate.id === athleteId);
-          return athlete ? `${slot.label}:${athlete.name}` : "";
-        })
-        .filter(Boolean)
-        .join("、") || "未登録";
-      const selectedNames = latestSlots
-        .map((slot) => {
-          const athleteId = assignments[slot.id];
-          const athlete = latestState.athletes.find((candidate) => candidate.id === athleteId);
-          return athlete ? `${slot.label}:${athlete.name}` : "";
-        })
-        .filter(Boolean)
-        .join("、");
-      const next: MeetingState = {
-        ...assigned,
-        auditLogs: [{
-          id: crypto.randomUUID(),
-          at: now,
-          actor: "生徒登録端末",
-          action: "当日種目登録",
-          entity: event.name,
-          before: beforeNames,
-          after: selectedNames,
-          reason: "種目別の組登録",
-        }, ...latestState.auditLogs],
-        updatedAt: now,
-      };
-      await persist(next, "当日種目登録", `${event.name}: ${selectedNames}`);
-      setSelfHeatAssignments({});
-      setSelfReviewing(false);
-      setMessage(`${event.name}の組登録を保存しました`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "種目登録の保存に失敗しました");
-    }
-  };
-
   const changeEntryAthlete = async (entryId: string, athleteId: string) => {
     const entry = state.entries.find((candidate) => candidate.id === entryId)!;
     if (entry.athleteId === athleteId) return;
@@ -936,11 +914,9 @@ export default function Home() {
         ? "総合順位（2026/08/03）"
         : view === "input"
           ? "記録入力（2026/08/03）"
-          : view === "selfEntry"
-            ? "当日 種目登録（2026/08/03）"
-            : view === "registration"
-              ? "エントリ登録（2026/08/03）"
-              : "大会管理（2026/08/03）";
+          : view === "registration"
+            ? "エントリ登録（2026/08/03）"
+            : "大会管理（2026/08/03）";
 
   const renderResultRow = (item: RankedResult, event: Event, showRank = false) => {
     const team = state.teams.find((candidate) => candidate.id === item.athlete.teamId)!;
@@ -1044,7 +1020,6 @@ export default function Home() {
             </table>
           </div>
           <div className="staff-links">
-            <button type="button" className="link-button student-entry-link" onClick={() => { setView("selfEntry"); window.scrollTo(0, 0); }}>当日 種目登録</button>
             <button type="button" className="link-button" onClick={() => openEvent("80m", "input")}>記録入力</button>
             <button type="button" className="link-button" onClick={() => { setView("registration"); window.scrollTo(0, 0); }}>エントリ登録</button>
             <button type="button" className="link-button" onClick={() => setView("admin")}>大会管理</button>
@@ -1164,45 +1139,112 @@ export default function Home() {
               <select className="select" aria-label="入力種目" value={selectedEvent.id} onChange={(event) => openEvent(event.target.value, "input")}>
                 {state.events.map((event) => <option key={event.id} value={event.id}>{fullEventName(event)}</option>)}
               </select>
-              <select className="select" aria-label="入力組" value={selectedHeat.id} onChange={(event) => { setSelectedHeatId(event.target.value); setReviewing(false); }}>
+              <select className="select" aria-label="入力組" value={selectedHeat.id} onChange={(event) => {
+                setSelectedHeatId(event.target.value);
+                setInputAthletes({});
+                setInputDrafts({});
+                setFieldAttemptDrafts({});
+                setInputCodes({});
+                setReviewing(false);
+              }}>
                 {selectedHeats.map((heat) => <option key={heat.id} value={heat.id}>{heat.number}組</option>)}
               </select>
             </div>
+            <div className="storage-note input-guide">
+              {isFieldInput
+                ? "各チーム5人を選び、1人3回の試技を入力します。最高記録は自動計算されます。"
+                : selectedEvent.id === "relay"
+                  ? "各チームの記録管理用代表者を1名選択して、チームの記録を入力します。"
+                  : "各組でA・B・Cチームから1名ずつ選び、その場で対戦する3人の記録を入力します。"}
+            </div>
           </div>
-          <div className="heat-title">{selectedEvent.name} {selectedHeat.number}組　レーン・試順</div>
+          <div className="heat-title">{selectedEvent.name} {selectedHeat.number}組　選手・記録入力</div>
           <div className="tablewrap">
-            <table className="grid input-grid">
-              <thead><tr><th>ﾚｰﾝ</th><th>No</th><th>競技者名</th><th>記録</th><th>状態</th></tr></thead>
-              <tbody>{heatEntries.sort((a, b) => a.laneOrOrder - b.laneOrOrder).map((entry) => {
-                const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
-                const existing = getResult(state, entry.id);
+            <table className={`grid input-grid ${isFieldInput ? "field-input-grid" : "track-input-grid"}`}>
+              <thead>{isFieldInput
+                ? <tr><th>チーム</th><th>選手</th><th>1回目</th><th>2回目</th><th>3回目</th><th>最高</th><th>状態</th></tr>
+                : <tr><th>チーム</th><th>選手</th><th>記録</th><th>状態</th></tr>}
+              </thead>
+              <tbody>{inputSlots.map((slot) => {
+                const team = state.teams.find((candidate) => candidate.id === slot.teamId)!;
+                const athleteId = inputAthleteId(slot.id);
+                const athlete = state.athletes.find((candidate) => candidate.id === athleteId);
+                const existingEntry = inputEntry(slot.id);
+                const existing = existingEntry ? getResult(state, existingEntry.id) : undefined;
+                const usedByOtherSlots = new Set(eventRegistrationSlots(state, selectedEvent.id)
+                  .filter((candidate) => candidate.id !== slot.id)
+                  .map((candidate) => inputAthletes[candidate.id] ?? savedInputAthletes[candidate.id] ?? "")
+                  .filter(Boolean));
+                const selectableAthletes = state.athletes
+                  .filter((candidate) => candidate.teamId === slot.teamId
+                    && (!usedByOtherSlots.has(candidate.id) || candidate.id === athleteId))
+                  .sort((left, right) => left.bib - right.bib);
+                const attemptDrafts = fieldAttemptDrafts[slot.id] ?? ["", "", ""];
+                const currentAttempts = [0, 1, 2].map((index) => attemptDrafts[index]
+                  ? normalizePerformance(attemptDrafts[index], selectedEvent)
+                  : existing?.attempts?.[index] ?? null);
+                const currentBest = bestPerformance(currentAttempts, selectedEvent) ?? existing?.value ?? null;
                 return (
-                  <tr key={entry.id} className={inputCodes[entry.id] ? "dns" : ""}>
-                    <td>{entry.laneOrOrder}</td><td>{athlete.bib}</td>
-                    <td className="athlete"><div className="kana">{athlete.kana}</div>{athlete.name}（{athlete.grade}）</td>
+                  <tr key={slot.id} className={inputCodes[slot.id] ? "dns" : ""}>
+                    <td className="team-cell">{team.shortName}</td>
                     <td>
-                      <input
-                        className="record-field"
-                        aria-label={`${athlete.name}の記録`}
-                        inputMode="decimal"
-                        pattern="[0-9.:]*"
-                        disabled={Boolean(inputCodes[entry.id])}
-                        value={inputDrafts[entry.id] ?? ""}
-                        placeholder={existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : ""}
-                        onChange={(event) => updateDraft(entry.id, event.target.value, "input")}
-                      />
-                      <span className="unit">{selectedEvent.unit === "meters" ? "m" : "秒"}</span>
+                      <select
+                        className="input-athlete-select"
+                        aria-label={`${slot.label}の選手`}
+                        value={athleteId}
+                        onChange={(change) => {
+                          setInputAthletes((current) => ({ ...current, [slot.id]: change.target.value }));
+                          setReviewing(false);
+                        }}
+                      >
+                        <option value="">選手を選択</option>
+                        {selectableAthletes.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>No.{candidate.bib} {candidate.name}</option>
+                        ))}
+                      </select>
                     </td>
+                    {isFieldInput ? [0, 1, 2].map((attemptIndex) => (
+                      <td key={attemptIndex}>
+                        <input
+                          className="record-field attempt-field"
+                          aria-label={`${athlete?.name ?? team.name}の${attemptIndex + 1}回目`}
+                          inputMode="decimal"
+                          pattern="[0-9.]*"
+                          disabled={Boolean(inputCodes[slot.id])}
+                          value={attemptDrafts[attemptIndex] ?? ""}
+                          placeholder={existing?.attempts?.[attemptIndex] !== null && existing?.attempts?.[attemptIndex] !== undefined
+                            ? formatPerformance(existing.attempts[attemptIndex], selectedEvent)
+                            : ""}
+                          onChange={(change) => updateFieldAttempt(slot.id, attemptIndex, change.target.value)}
+                        />
+                      </td>
+                    )) : (
+                      <td>
+                        <input
+                          className="record-field"
+                          aria-label={`${athlete?.name ?? team.name}の記録`}
+                          inputMode="decimal"
+                          pattern="[0-9.:]*"
+                          disabled={Boolean(inputCodes[slot.id])}
+                          value={inputDrafts[slot.id] ?? ""}
+                          placeholder={existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : ""}
+                          onChange={(change) => updateDraft(slot.id, change.target.value, "input")}
+                        />
+                        <span className="unit">秒</span>
+                      </td>
+                    )}
+                    {isFieldInput && <td className="best-field">{formatPerformance(currentBest, selectedEvent) || "-"}</td>}
                     <td>
                       <div className="code-row">
                         {RESULT_CODES.map((code) => <button
                           key={code}
-                          className={inputCodes[entry.id] === code ? "selected" : ""}
-                          aria-pressed={inputCodes[entry.id] === code}
+                          className={inputCodes[slot.id] === code ? "selected" : ""}
+                          aria-pressed={inputCodes[slot.id] === code}
                           onClick={() => setInputCodes((current) => {
                             const next = { ...current };
-                            if (next[entry.id] === code) delete next[entry.id];
-                            else next[entry.id] = code;
+                            if (next[slot.id] === code) delete next[slot.id];
+                            else next[slot.id] = code;
+                            setReviewing(false);
                             return next;
                           })}
                         >{code}</button>)}
@@ -1213,119 +1255,42 @@ export default function Home() {
               })}</tbody>
             </table>
           </div>
-          <div className="input-summary">今回の入力：{inputChangeCount}件 ／ 未変更：{heatEntries.length - inputChangeCount}件</div>
+          <div className="input-summary">今回の入力：{inputChangeCount}件 ／ 未変更：{inputSlots.length - inputChangeCount}件</div>
           <div className="input-actions">
-            <button className="darkbtn" onClick={() => {
-              if (!inputChangeCount) {
-                setMessage("記録またはDNS・DNF・DQ・NMを1件以上入力してください");
-                return;
-              }
-              setReviewing(true);
-            }}>入力内容を確認</button>
+            <button className="darkbtn" onClick={reviewInput}>入力内容を確認</button>
           </div>
           {reviewing && (
             <div className="review-section">
               <div className="heat-title">入力内容確認　{selectedHeat.number}組</div>
               <div className="tablewrap">
                 <table className="grid review-grid">
-                  <thead><tr><th>ﾚｰﾝ</th><th>競技者名</th><th>保存内容</th></tr></thead>
-                  <tbody>{heatEntries.map((entry) => {
-                    const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId)!;
-                    const existing = getResult(state, entry.id);
-                    const value = inputCodes[entry.id]
-                      || formatPerformance(normalizePerformance(inputDrafts[entry.id] || "", selectedEvent), selectedEvent)
-                      || (existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : existing?.status)
+                  <thead><tr><th>チーム</th><th>競技者名</th><th>保存内容</th></tr></thead>
+                  <tbody>{inputSlots.filter((slot) => inputAthleteId(slot.id)).map((slot) => {
+                    const athlete = state.athletes.find((candidate) => candidate.id === inputAthleteId(slot.id))!;
+                    const existingEntry = inputEntry(slot.id);
+                    const existing = existingEntry ? getResult(state, existingEntry.id) : undefined;
+                    const attemptRaws = fieldAttemptDrafts[slot.id] ?? [];
+                    const attemptValues = [0, 1, 2].map((index) => attemptRaws[index]
+                      ? normalizePerformance(attemptRaws[index], selectedEvent)
+                      : existing?.attempts?.[index] ?? null);
+                    const validAttempts = attemptValues.filter((value): value is number => value !== null);
+                    const fieldValue = validAttempts.length
+                      ? `${attemptValues.map((value) => formatPerformance(value, selectedEvent) || "-").join(" / ")}（最高 ${formatPerformance(bestPerformance(validAttempts, selectedEvent), selectedEvent)}）`
+                      : existing?.attempts?.length
+                        ? `${existing.attempts.map((value) => formatPerformance(value, selectedEvent) || "-").join(" / ")}（最高 ${formatPerformance(existing.value, selectedEvent)}）`
+                        : existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : existing?.status;
+                    const value = inputCodes[slot.id]
+                      || (isFieldInput
+                        ? fieldValue
+                        : formatPerformance(normalizePerformance(inputDrafts[slot.id] || "", selectedEvent), selectedEvent)
+                          || (existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : existing?.status))
                       || "未入力";
-                    const changed = Boolean(inputCodes[entry.id] || inputDrafts[entry.id]);
-                    return <tr key={entry.id}><td>{entry.laneOrOrder}</td><td>{athlete.name}</td><td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
+                    const changed = Boolean(inputCodes[slot.id] || inputDrafts[slot.id] || attemptRaws.some(Boolean));
+                    return <tr key={slot.id}><td>{slot.teamId}</td><td>{athlete.name}</td><td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
                   })}</tbody>
                 </table>
               </div>
               <div className="input-actions"><button className="mutedbtn" onClick={() => setReviewing(false)}>入力へ戻る</button><button className="darkbtn" onClick={saveProvisional}>速報保存</button></div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {view === "selfEntry" && (
-        <section>
-          <div className="result-head">
-            <div className="event-title">生徒用　当日種目登録　<span className="sync-label">{syncState}</span></div>
-            <div className="storage-note">競技を選び、登録枠ごとに出場選手をプルダウンから選択してください。走幅跳・走高跳・砲丸投は1組決勝の中に各チーム3枠ずつ表示します。全員リレーは選択不要です。</div>
-          </div>
-          <div className="self-entry-form">
-            <div className="self-step">
-              <label htmlFor="self-event">1．競技</label>
-              <select
-                id="self-event"
-                className="select"
-                value={selfEvent.id}
-                onChange={(event) => chooseSelfEvent(event.target.value)}
-              >
-                {state.events.filter((event) => event.id !== "relay").map((event) => (
-                  <option key={event.id} value={event.id}>{event.startTime}　{fullEventName(event)}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="tablewrap">
-            <table className="grid self-entry-grid">
-              <thead><tr><th>登録枠</th><th>氏名</th><th>チーム</th></tr></thead>
-              <tbody>{selfSlots.map((slot) => {
-                const athleteId = currentSelfHeatInputs[slot.id] ?? "";
-                const slotTeam = slot.teamId ? state.teams.find((candidate) => candidate.id === slot.teamId) : undefined;
-                const athlete = state.athletes.find((candidate) => candidate.id === athleteId);
-                const team = slotTeam ?? (athlete ? state.teams.find((candidate) => candidate.id === athlete.teamId) : undefined);
-                const selectableAthletes = state.athletes
-                  .filter((candidate) => !slot.teamId || candidate.teamId === slot.teamId)
-                  .sort((left, right) => left.bib - right.bib);
-                return (
-                  <tr key={slot.id}>
-                    <td>{slot.label}</td>
-                    <td>
-                      <select
-                        className="assignment-select self-name-field"
-                        aria-label={`${selfEvent.name}${slot.label}の氏名`}
-                        value={athleteId}
-                        onChange={(change) => updateSelfHeatAssignment(slot.id, change.target.value)}
-                      >
-                        <option value="">未選択</option>
-                        {selectableAthletes.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>No.{candidate.bib}　{candidate.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{team?.shortName ?? "－"}</td>
-                  </tr>
-                );
-              })}</tbody>
-            </table>
-          </div>
-          <div className="input-actions">
-            <button className="darkbtn" onClick={reviewSelfEntry}>入力内容を確認</button>
-          </div>
-          {selfReviewing && (
-            <div className="review-section self-review">
-              <div className="heat-title">登録内容の確認</div>
-              <div className="tablewrap">
-                <table className="grid review-grid">
-                  <thead><tr><th>競技</th><th>登録枠</th><th>氏名</th></tr></thead>
-                  <tbody>{selfSlots.map((slot) => {
-                    const athlete = state.athletes.find((candidate) => candidate.id === (currentSelfHeatInputs[slot.id] ?? ""));
-                    return athlete ? (
-                      <tr key={slot.id}>
-                        <td className="event">{selfEvent.name}</td>
-                        <td>{slot.label}</td>
-                        <td className="event">{athlete.name}</td>
-                      </tr>
-                    ) : null;
-                  })}</tbody>
-                </table>
-              </div>
-              <div className="input-actions">
-                <button className="mutedbtn" onClick={() => setSelfReviewing(false)}>戻って修正</button>
-                <button className="darkbtn" onClick={saveSelfEntry}>この内容で登録</button>
-              </div>
             </div>
           )}
         </section>

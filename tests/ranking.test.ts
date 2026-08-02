@@ -5,6 +5,7 @@ import {
   calculateAthleteEventScores,
   calculateEventScoreTransactions,
   calculateOverallStandings,
+  bestPerformance,
   formatPerformance,
   normalizePerformance,
   rankResults,
@@ -61,6 +62,12 @@ test("表示値と計算値を分離して整形する", () => {
   assert.equal(formatPerformance(63.87, sprint), "1:03.87");
   assert.equal(formatPerformance(5.42, longJump), "5m42");
   assert.equal(formatPerformance(null, longJump), "");
+});
+
+test("フィールド3試技から最高記録を自動採用する", () => {
+  assert.equal(bestPerformance([5.12, 5.34, 5.21], longJump), 5.34);
+  assert.equal(bestPerformance([null, 5.2, null], longJump), 5.2);
+  assert.equal(bestPerformance([null, null, null], longJump), null);
 });
 
 test("トラックは昇順、フィールドは降順で順位を付ける", () => {

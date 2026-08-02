@@ -63,6 +63,7 @@ export type Result = {
   status: ResultStatus;
   provisional: boolean;
   isPersonalBest: boolean;
+  attempts?: Array<number | null>;
 };
 
 export type ScoreRule = {
@@ -151,8 +152,8 @@ export const events: Event[] = [
 ];
 
 const heatCounts: Record<string, number> = {
-  "80m": 3, "250m": 3, long: 1, high: 1, shot: 1,
-  "500m": 3, hurdle: 3, "1000m": 1, relay: 1,
+  "80m": 5, "250m": 5, long: 1, high: 1, shot: 1,
+  "500m": 5, hurdle: 5, "1000m": 1, relay: 1,
 };
 
 export const heats: Heat[] = events.flatMap((event) =>

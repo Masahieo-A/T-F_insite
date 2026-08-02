@@ -84,7 +84,8 @@ export type EventRegistrationSlot = {
   label: string;
   heatId: string;
   laneOrOrder: number;
-  teamId?: string;
+  teamId: string;
+  slotNumber: number;
 };
 
 const TEAM_FIELD_EVENT_IDS = new Set(["long", "high", "shot"]);
@@ -103,34 +104,48 @@ export function eventRegistrationSlots(state: MeetingState, eventId: string): Ev
     return [...state.teams]
       .sort((left, right) => left.displayOrder - right.displayOrder)
       .flatMap((team, teamIndex) =>
-        [1, 2, 3].map((slotNumber) => ({
+        [1, 2, 3, 4, 5].map((slotNumber) => ({
           id: `${eventId}-${team.id}-slot-${slotNumber}`,
-          label: `${heat.number}組 ${team.shortName}チーム${slotNumber}枠`,
+          label: `${team.shortName}チーム ${slotNumber}人目`,
           heatId: heat.id,
-          laneOrOrder: teamIndex * 3 + slotNumber,
+          laneOrOrder: teamIndex * 5 + slotNumber,
           teamId: team.id,
+          slotNumber,
         })),
       );
   }
-  return heats.map((heat) => ({
-    id: heat.id,
-    label: `${heat.number}組`,
-    heatId: heat.id,
-    laneOrOrder: 1,
-  }));
+  return heats.flatMap((heat) => [...state.teams]
+    .sort((left, right) => left.displayOrder - right.displayOrder)
+    .map((team, teamIndex) => ({
+      id: `${eventId}-${heat.id}-${team.id}`,
+      label: `${heat.number}組 ${team.shortName}チーム`,
+      heatId: heat.id,
+      laneOrOrder: teamIndex + 1,
+      teamId: team.id,
+      slotNumber: 1,
+    })));
 }
 
 export function eventSlotAssignmentsForEvent(state: MeetingState, eventId: string) {
-  return Object.fromEntries(
-    eventRegistrationSlots(state, eventId)
-      .map((slot) => {
-        const entry = state.entries.find((candidate) =>
-          candidate.eventId === eventId
-          && candidate.heatId === slot.heatId
-          && candidate.laneOrOrder === slot.laneOrOrder);
-        return [slot.id, entry?.athleteId ?? ""];
-      }),
-  );
+  const eventEntries = state.entries.filter((entry) => entry.eventId === eventId);
+  const usedEntryIds = new Set<string>();
+  return Object.fromEntries(eventRegistrationSlots(state, eventId).map((slot) => {
+    const exact = eventEntries.find((entry) => {
+      const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId);
+      return !usedEntryIds.has(entry.id)
+        && entry.heatId === slot.heatId
+        && entry.laneOrOrder === slot.laneOrOrder
+        && athlete?.teamId === slot.teamId;
+    });
+    const compatible = exact ?? eventEntries.find((entry) => {
+      const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId);
+      return !usedEntryIds.has(entry.id)
+        && entry.heatId === slot.heatId
+        && athlete?.teamId === slot.teamId;
+    });
+    if (compatible) usedEntryIds.add(compatible.id);
+    return [slot.id, compatible?.athleteId ?? ""];
+  }));
 }
 
 export function applyEventSlotAthleteAssignments(
@@ -156,7 +171,7 @@ export function applyEventSlotAthleteAssignments(
   const teamsById = new Map(state.teams.map((team) => [team.id, team]));
   for (const slot of slots) {
     const athleteId = assignments[slot.id];
-    if (!athleteId || !slot.teamId) continue;
+    if (!athleteId) continue;
     const athlete = state.athletes.find((candidate) => candidate.id === athleteId)!;
     if (athlete.teamId !== slot.teamId) {
       const team = teamsById.get(slot.teamId);
@@ -166,6 +181,7 @@ export function applyEventSlotAthleteAssignments(
 
   const previousEventEntries = state.entries.filter((entry) => entry.eventId === eventId);
   const previousBySlot = new Map(previousEventEntries.map((entry) => [`${entry.heatId}:${entry.laneOrOrder}`, entry]));
+  const previousByAthlete = new Map(previousEventEntries.map((entry) => [entry.athleteId, entry]));
   const entries = state.entries.filter((entry) => entry.eventId !== eventId);
   const keptEntryIds = new Set(entries.map((entry) => entry.id));
 
@@ -183,7 +199,8 @@ export function applyEventSlotAthleteAssignments(
   for (const slot of slots) {
     const athleteId = assignments[slot.id];
     if (!athleteId) continue;
-    const previous = previousBySlot.get(`${slot.heatId}:${slot.laneOrOrder}`);
+    const exactPrevious = previousBySlot.get(`${slot.heatId}:${slot.laneOrOrder}`);
+    const previous = exactPrevious?.athleteId === athleteId ? exactPrevious : previousByAthlete.get(athleteId);
     const entry: Entry = {
       id: previous?.athleteId === athleteId ? previous.id : `entry-self-${eventId}-${slot.id}-${athleteId}`,
       eventId,
