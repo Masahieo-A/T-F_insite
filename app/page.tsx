@@ -1226,7 +1226,7 @@ export default function Home() {
                       <td>
                         <input
                           className="record-field"
-                          aria-label={`${athlete?.name ?? team.name}の記録`}
+                          aria-label={`${isRelayInput ? team.name : athlete?.name ?? team.name}の記録`}
                           inputMode="decimal"
                           pattern="[0-9.:]*"
                           disabled={Boolean(inputCodes[slot.id])}
