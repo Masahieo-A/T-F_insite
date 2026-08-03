@@ -2,6 +2,7 @@ import type { MeetingState } from "./domain.ts";
 
 export const STANDINGS_LOCK_EVENT_ID = "hurdle";
 export const STANDINGS_LOCK_HEAT_NUMBER = 2;
+export const STANDINGS_LOCK_REQUIRED_RESULTS = 6;
 
 export function isStandingsLocked(state: MeetingState) {
   const triggerHeat = state.heats.find((heat) =>
@@ -11,5 +12,8 @@ export function isStandingsLocked(state: MeetingState) {
   const triggerEntryIds = new Set(state.entries
     .filter((entry) => entry.heatId === triggerHeat.id)
     .map((entry) => entry.id));
-  return state.results.some((result) => triggerEntryIds.has(result.entryId));
+  const completedResultEntryIds = new Set(state.results
+    .filter((result) => triggerEntryIds.has(result.entryId))
+    .map((result) => result.entryId));
+  return completedResultEntryIds.size >= STANDINGS_LOCK_REQUIRED_RESULTS;
 }
