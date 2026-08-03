@@ -89,26 +89,34 @@ export type EventRegistrationSlot = {
 };
 
 const TEAM_FIELD_EVENT_IDS = new Set(["long", "high", "shot"]);
+const TEAM_THREE_PERSON_EVENT_IDS = new Set(["1000m"]);
 
 function isTeamFieldEvent(eventId: string) {
   return TEAM_FIELD_EVENT_IDS.has(eventId);
+}
+
+function teamSlotCount(eventId: string) {
+  if (isTeamFieldEvent(eventId)) return 5;
+  if (TEAM_THREE_PERSON_EVENT_IDS.has(eventId)) return 3;
+  return 1;
 }
 
 export function eventRegistrationSlots(state: MeetingState, eventId: string): EventRegistrationSlot[] {
   const heats = state.heats
     .filter((heat) => heat.eventId === eventId)
     .sort((left, right) => left.number - right.number);
-  if (isTeamFieldEvent(eventId)) {
+  const slotCount = teamSlotCount(eventId);
+  if (slotCount > 1) {
     const heat = heats[0];
     if (!heat) return [];
     return [...state.teams]
       .sort((left, right) => left.displayOrder - right.displayOrder)
       .flatMap((team, teamIndex) =>
-        [1, 2, 3, 4, 5].map((slotNumber) => ({
+        Array.from({ length: slotCount }, (_, index) => index + 1).map((slotNumber) => ({
           id: `${eventId}-${team.id}-slot-${slotNumber}`,
           label: `${team.name} ${slotNumber}人目`,
           heatId: heat.id,
-          laneOrOrder: teamIndex * 5 + slotNumber,
+          laneOrOrder: teamIndex * slotCount + slotNumber,
           teamId: team.id,
           slotNumber,
         })),

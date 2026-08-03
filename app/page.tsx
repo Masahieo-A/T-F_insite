@@ -80,7 +80,7 @@ function isMeetingState(value: unknown): value is MeetingState {
 }
 
 function withRequiredHeats(state: MeetingState) {
-  const requiredCounts: Record<string, number> = { "80m": 5, "250m": 5, "500m": 5, hurdle: 5 };
+  const requiredCounts: Record<string, number> = { "80m": 6, "250m": 6, "500m": 6, hurdle: 6 };
   const heats = [...state.heats];
   for (const [eventId, count] of Object.entries(requiredCounts)) {
     for (let number = 1; number <= count; number += 1) {
