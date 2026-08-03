@@ -170,8 +170,8 @@ function sharedPlacePoints(rank: number, tiedCount: number, points: number[]) {
 
 function heatNumberLabel(entry: Entry) {
   const heatNumber = entry.heatId.match(/-heat-(\d+)$/)?.[1];
-  if (entry.eventId === "hurdle" && heatNumber === "1") return "男子";
-  if (entry.eventId === "hurdle" && heatNumber === "2") return "女子";
+  if ((entry.eventId === "hurdle" || entry.eventId === "1000m") && heatNumber === "1") return "男子";
+  if ((entry.eventId === "hurdle" || entry.eventId === "1000m") && heatNumber === "2") return "女子";
   return heatNumber ? `${heatNumber}組` : "組";
 }
 
@@ -210,7 +210,7 @@ export function calculateAthleteEventScores(
 ): AthleteEventScore[] {
   const eligible = ranked.filter((item) =>
     item.entry.scoringEligible
-    && (event.id !== "hurdle" || heatSortValue(item.entry) <= 2));
+    && (!["hurdle", "1000m"].includes(event.id) || heatSortValue(item.entry) <= 2));
   const scoringRanked = [...new Set(eligible.map((item) => item.entry.heatId))]
     .sort((left, right) => {
       const leftNumber = Number(left.match(/-heat-(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
@@ -243,8 +243,8 @@ export function calculateAthleteEventScores(
       candidate.entry.heatId === item.entry.heatId && candidate.rank === item.rank).length;
     const row = rows.find((candidate) => candidate.entryId === item.entry.id)!;
     row.rank = item.rank;
-    row.basePoints = event.id === "hurdle"
-      ? hurdleHeatPoints(item.entry, item.rank!)
+    row.basePoints = ["hurdle", "1000m"].includes(event.id)
+      ? sexSplitHeatPoints(item.entry, item.rank!)
       : sharedPlacePoints(item.rank!, tiedCount, points);
   }
 
@@ -259,18 +259,30 @@ export function calculateAthleteEventScores(
   });
 }
 
-function hurdleHeatPoints(entry: Entry, rank: number) {
+function sexSplitHeatPoints(entry: Entry, rank: number) {
   const heatNumber = heatSortValue(entry);
-  if (heatNumber === 1) {
+  if (entry.eventId === "hurdle" && heatNumber === 1) {
     if (rank <= 3) return 6;
     if (rank <= 6) return 4;
     if (rank <= 9) return 2;
     return 0;
   }
-  if (heatNumber === 2) {
+  if (entry.eventId === "hurdle" && heatNumber === 2) {
     if (rank <= 2) return 6;
     if (rank <= 4) return 4;
     if (rank <= 6) return 2;
+    return 0;
+  }
+  if (entry.eventId === "1000m" && heatNumber === 1) {
+    if (rank <= 2) return 6;
+    if (rank <= 4) return 4;
+    if (rank <= 6) return 2;
+    return 0;
+  }
+  if (entry.eventId === "1000m" && heatNumber === 2) {
+    if (rank <= 1) return 6;
+    if (rank <= 2) return 4;
+    if (rank <= 3) return 2;
   }
   return 0;
 }
@@ -334,7 +346,7 @@ export function calculateOverallStandings(
       return ownTotal > 0 && ownTotal === Math.max(...teamTotals);
     }).length;
     const individualWins = own.filter((transaction) =>
-      transaction.reason === "event-rank" && /(組|全体|リレー)1位/.test(transaction.note)).length;
+      transaction.reason === "event-rank" && /(組|全体|リレー|男子|女子)1位/.test(transaction.note)).length;
     const relayNote = own.find((transaction) =>
       transaction.eventId === "relay" && transaction.reason === "event-rank")?.note ?? "";
     const relayRank = Number(relayNote.match(/リレー(\d+)位/)?.[1] ?? 99);

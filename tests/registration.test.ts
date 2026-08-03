@@ -137,13 +137,19 @@ test("フィールドのチーム枠には別チームの選手を登録しな�
   );
 });
 
-test("1000mは1組決勝のまま各チーム3枠を用意する", () => {
+test("1000mは男子6枠・女子3枠の2組を用意し、全選手を選択できる", () => {
   const slots = eventRegistrationSlots(initialState, "1000m");
+  const maleSlots = slots.filter((slot) => slot.heatId === "1000m-heat-1");
+  const femaleSlots = slots.filter((slot) => slot.heatId === "1000m-heat-2");
+  const aSlot = maleSlots[0];
+  const bAthlete = initialState.athletes.find((athlete) => athlete.teamId === "B")!;
+  const next = applyEventSlotAthleteAssignments(initialState, "1000m", { [aSlot.id]: bAthlete.id });
 
   assert.equal(slots.length, 9);
-  assert.equal(new Set(slots.map((slot) => slot.heatId)).size, 1);
-  assert.deepEqual(slots.map((slot) => slot.laneOrOrder), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  assert.deepEqual(slots.map((slot) => slot.teamId), ["A", "A", "A", "B", "B", "B", "C", "C", "C"]);
+  assert.equal(maleSlots.length, 6);
+  assert.equal(femaleSlots.length, 3);
+  assert.deepEqual([...new Set(slots.map((slot) => slot.teamId))], [OPEN_TEAM_SLOT_ID]);
+  assert.ok(next.entries.some((entry) => entry.eventId === "1000m" && entry.athleteId === bAthlete.id));
 });
 
 test("110mハードルは男子9枠・女子6枠の2組を用意し、全選手を選択できる", () => {
@@ -166,6 +172,6 @@ test("フィールド・1000m・リレー・110mハードル以外のトラッ�
     assert.equal(initialState.heats.filter((heat) => heat.eventId === eventId).length, 6);
   }
   assert.equal(initialState.heats.filter((heat) => heat.eventId === "hurdle").length, 2);
-  assert.equal(initialState.heats.filter((heat) => heat.eventId === "1000m").length, 1);
+  assert.equal(initialState.heats.filter((heat) => heat.eventId === "1000m").length, 2);
   assert.equal(initialState.heats.filter((heat) => heat.eventId === "relay").length, 1);
 });

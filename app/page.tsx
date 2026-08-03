@@ -81,8 +81,9 @@ function isMeetingState(value: unknown): value is MeetingState {
 }
 
 function withRequiredHeats(state: MeetingState) {
-  const requiredCounts: Record<string, number> = { "80m": 6, "250m": 6, "500m": 6, hurdle: 2 };
-  const heats = state.heats.filter((heat) => heat.eventId !== "hurdle" || heat.number <= 2);
+  const requiredCounts: Record<string, number> = { "80m": 6, "250m": 6, "500m": 6, hurdle: 2, "1000m": 2 };
+  const heats = state.heats.filter((heat) =>
+    !["hurdle", "1000m"].includes(heat.eventId) || heat.number <= 2);
   for (const [eventId, count] of Object.entries(requiredCounts)) {
     for (let number = 1; number <= count; number += 1) {
       if (heats.some((heat) => heat.eventId === eventId && heat.number === number)) continue;
@@ -112,8 +113,8 @@ function withRequiredHeats(state: MeetingState) {
 }
 
 function heatLabel(event: Event, heat: { number: number }) {
-  if (event.id === "hurdle" && heat.number === 1) return "男子";
-  if (event.id === "hurdle" && heat.number === 2) return "女子";
+  if ((event.id === "hurdle" || event.id === "1000m") && heat.number === 1) return "男子";
+  if ((event.id === "hurdle" || event.id === "1000m") && heat.number === 2) return "女子";
   return `${heat.number}組`;
 }
 
@@ -261,7 +262,7 @@ export default function Home() {
   const selectedEvent = state.events.find((event) => event.id === selectedEventId) ?? state.events[0];
   const selectedHeats = state.heats.filter((heat) =>
     heat.eventId === selectedEvent.id
-    && (selectedEvent.id !== "hurdle" || heat.number <= 2));
+    && (!["hurdle", "1000m"].includes(selectedEvent.id) || heat.number <= 2));
   const selectedHeat = selectedHeats.find((heat) => heat.id === selectedHeatId) ?? selectedHeats[0];
   const inputSlots = eventRegistrationSlots(state, selectedEvent.id)
     .filter((slot) => slot.heatId === selectedHeat?.id);
@@ -270,7 +271,7 @@ export default function Home() {
   const isRelayInput = selectedEvent.id === "relay";
   const eventEntries = state.entries.filter((entry) =>
     entry.eventId === selectedEvent.id
-    && (selectedEvent.id !== "hurdle" || heatNumberFromId(entry.heatId) <= 2));
+    && (!["hurdle", "1000m"].includes(selectedEvent.id) || heatNumberFromId(entry.heatId) <= 2));
   const inputChangeCount = inputSlots.filter((slot) =>
     Boolean(inputCodes[slot.id]
       || inputDrafts[slot.id]
@@ -1302,6 +1303,8 @@ export default function Home() {
                   ? "全員リレーは各チームの記録だけを入力します。選手の選択は必要ありません。"
                   : selectedEvent.id === "hurdle"
                     ? "男子は9名、女子は6名を選びます。選手プルダウンは全員から選択できます。得点はタイムレース順位で自動計算します。"
+                    : selectedEvent.id === "1000m"
+                      ? "男子は6名、女子は3名を選びます。選手プルダウンは全員から選択できます。得点はタイムレース順位で自動計算します。"
                   : "各組でA・B・Cチームから1名ずつ選び、その場で対戦する3人の記録を入力します。"}
             </div>
           </div>

@@ -16,6 +16,7 @@ import {
 const sprint = events.find((event) => event.id === "80m")!;
 const longJump = events.find((event) => event.id === "long")!;
 const hurdle = events.find((event) => event.id === "hurdle")!;
+const distance1000 = events.find((event) => event.id === "1000m")!;
 const entries: Entry[] = athletes.slice(0, 7).map((athlete, index) => ({
   id: `test-entry-${index}`,
   eventId: sprint.id,
@@ -224,6 +225,41 @@ test("110mハードルは男子9名・女子6名のタイムレース帯別に�
   assert.deepEqual(scores.slice(9).map((score) => score.basePoints), [6, 6, 4, 4, 2, 2]);
   assert.deepEqual(scores.slice(0, 2).map((score) => score.heatLabel), ["男子", "男子"]);
   assert.deepEqual(scores.slice(9, 11).map((score) => score.heatLabel), ["女子", "女子"]);
+});
+
+test("1000mは男子6名・女子3名のタイムレース帯別に得点を付ける", () => {
+  const distanceAthletes = athletes.slice(0, 9).map((athlete, index) => ({
+    ...athlete,
+    id: `distance-athlete-${index}`,
+    teamId: teams[index % 3].id,
+  }));
+  const distanceEntries: Entry[] = distanceAthletes.map((athlete, index) => ({
+    id: `distance-entry-${index}`,
+    eventId: distance1000.id,
+    heatId: index < 6 ? "1000m-heat-1" : "1000m-heat-2",
+    athleteId: athlete.id,
+    laneOrOrder: index < 6 ? index + 1 : index - 5,
+    scoringEligible: true,
+  }));
+  const distanceResults: Result[] = distanceEntries.map((entry, index) => ({
+    id: `distance-result-${index}`,
+    entryId: entry.id,
+    value: index < 6 ? 180 + index : 240 + index - 6,
+    displayValue: "",
+    status: "OK",
+    provisional: true,
+    isPersonalBest: false,
+  }));
+  const scores = calculateAthleteEventScores(
+    distance1000,
+    rankResults(distanceResults, distanceEntries, distanceAthletes, distance1000),
+    scoreRules[0],
+  );
+
+  assert.deepEqual(scores.slice(0, 6).map((score) => score.basePoints), [6, 6, 4, 4, 2, 2]);
+  assert.deepEqual(scores.slice(6).map((score) => score.basePoints), [6, 4, 2]);
+  assert.deepEqual(scores.slice(0, 2).map((score) => score.heatLabel), ["男子", "男子"]);
+  assert.deepEqual(scores.slice(6, 8).map((score) => score.heatLabel), ["女子", "女子"]);
 });
 
 test("同着は該当順位点を平均し、無効記録は0点にする", () => {

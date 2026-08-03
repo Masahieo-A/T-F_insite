@@ -88,7 +88,6 @@ export type EventRegistrationSlot = {
 };
 
 const TEAM_FIELD_EVENT_IDS = new Set(["long", "high", "shot"]);
-const TEAM_THREE_PERSON_EVENT_IDS = new Set(["1000m"]);
 export const OPEN_TEAM_SLOT_ID = "__open__";
 
 function isOpenTeamSlot(teamId: string) {
@@ -101,25 +100,36 @@ function isTeamFieldEvent(eventId: string) {
 
 function teamSlotCount(eventId: string) {
   if (isTeamFieldEvent(eventId)) return 5;
-  if (TEAM_THREE_PERSON_EVENT_IDS.has(eventId)) return 3;
   return 1;
+}
+
+function sexSplitOpenSlotConfig(eventId: string, heatNumber: number) {
+  if (eventId === "hurdle") {
+    if (heatNumber === 1) return { count: 9, labelPrefix: "110m男子" };
+    if (heatNumber === 2) return { count: 6, labelPrefix: "110m女子" };
+  }
+  if (eventId === "1000m") {
+    if (heatNumber === 1) return { count: 6, labelPrefix: "1000m男子" };
+    if (heatNumber === 2) return { count: 3, labelPrefix: "1000m女子" };
+  }
+  return null;
 }
 
 export function eventRegistrationSlots(state: MeetingState, eventId: string): EventRegistrationSlot[] {
   const heats = state.heats
     .filter((heat) => heat.eventId === eventId)
     .sort((left, right) => left.number - right.number);
-  if (eventId === "hurdle") {
+  if (eventId === "hurdle" || eventId === "1000m") {
     return heats
       .filter((heat) => heat.number <= 2)
       .flatMap((heat) => {
-        const count = heat.number === 1 ? 9 : 6;
-        const heatLabel = heat.number === 1 ? "男子" : "女子";
-        return Array.from({ length: count }, (_, index) => {
+        const config = sexSplitOpenSlotConfig(eventId, heat.number);
+        if (!config) return [];
+        return Array.from({ length: config.count }, (_, index) => {
           const slotNumber = index + 1;
           return {
             id: `${eventId}-${heat.id}-slot-${slotNumber}`,
-            label: `110m${heatLabel} ${slotNumber}人目`,
+            label: `${config.labelPrefix} ${slotNumber}人目`,
             heatId: heat.id,
             laneOrOrder: slotNumber,
             teamId: OPEN_TEAM_SLOT_ID,

@@ -147,13 +147,13 @@ export const events: Event[] = [
   { id: "shot", name: "砲丸投", category: "共通", kind: "field", discipline: "投てき", direction: "desc", unit: "meters", startTime: "14:35", round: "決　勝", scoringSlots: 3, status: "編成済み" },
   { id: "500m", name: "500m（250m×2周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "15:45", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 3, status: "編成済み" },
   { id: "hurdle", name: "110mハードル", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:05", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 9, status: "編成済み" },
-  { id: "1000m", name: "1000m（4周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:25", round: "決　勝", scoringSlots: 3, status: "編成済み" },
+  { id: "1000m", name: "1000m（4周）", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:25", round: "ﾀｲﾑﾚｰｽ", scoringSlots: 6, status: "編成済み" },
   { id: "relay", name: "9×400m 全員リレー", category: "共通", kind: "track", discipline: "トラック", direction: "asc", unit: "seconds", startTime: "16:50", round: "決　勝", scoringSlots: 1, status: "編成済み" },
 ];
 
 const heatCounts: Record<string, number> = {
   "80m": 6, "250m": 6, long: 1, high: 1, shot: 1,
-  "500m": 6, hurdle: 2, "1000m": 1, relay: 1,
+  "500m": 6, hurdle: 2, "1000m": 2, relay: 1,
 };
 
 export const heats: Heat[] = events.flatMap((event) =>
