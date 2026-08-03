@@ -89,6 +89,11 @@ export type EventRegistrationSlot = {
 
 const TEAM_FIELD_EVENT_IDS = new Set(["long", "high", "shot"]);
 const TEAM_THREE_PERSON_EVENT_IDS = new Set(["1000m"]);
+export const OPEN_TEAM_SLOT_ID = "__open__";
+
+function isOpenTeamSlot(teamId: string) {
+  return teamId === OPEN_TEAM_SLOT_ID;
+}
 
 function isTeamFieldEvent(eventId: string) {
   return TEAM_FIELD_EVENT_IDS.has(eventId);
@@ -104,6 +109,25 @@ export function eventRegistrationSlots(state: MeetingState, eventId: string): Ev
   const heats = state.heats
     .filter((heat) => heat.eventId === eventId)
     .sort((left, right) => left.number - right.number);
+  if (eventId === "hurdle") {
+    return heats
+      .filter((heat) => heat.number <= 2)
+      .flatMap((heat) => {
+        const count = heat.number === 1 ? 9 : 6;
+        const heatLabel = heat.number === 1 ? "男子" : "女子";
+        return Array.from({ length: count }, (_, index) => {
+          const slotNumber = index + 1;
+          return {
+            id: `${eventId}-${heat.id}-slot-${slotNumber}`,
+            label: `110m${heatLabel} ${slotNumber}人目`,
+            heatId: heat.id,
+            laneOrOrder: slotNumber,
+            teamId: OPEN_TEAM_SLOT_ID,
+            slotNumber,
+          };
+        });
+      });
+  }
   const slotCount = teamSlotCount(eventId);
   if (slotCount > 1) {
     const heat = heats[0];
@@ -142,13 +166,13 @@ export function eventSlotAssignmentsForEvent(state: MeetingState, eventId: strin
       return !usedEntryIds.has(entry.id)
         && entry.heatId === slot.heatId
         && entry.laneOrOrder === slot.laneOrOrder
-        && athlete?.teamId === slot.teamId;
+        && (isOpenTeamSlot(slot.teamId) || athlete?.teamId === slot.teamId);
     });
     const compatible = exact ?? eventEntries.find((entry) => {
       const athlete = state.athletes.find((candidate) => candidate.id === entry.athleteId);
       return !usedEntryIds.has(entry.id)
         && entry.heatId === slot.heatId
-        && athlete?.teamId === slot.teamId;
+        && (isOpenTeamSlot(slot.teamId) || athlete?.teamId === slot.teamId);
     });
     if (compatible) usedEntryIds.add(compatible.id);
     return [slot.id, compatible?.athleteId ?? ""];
@@ -180,7 +204,7 @@ export function applyEventSlotAthleteAssignments(
     const athleteId = assignments[slot.id];
     if (!athleteId) continue;
     const athlete = state.athletes.find((candidate) => candidate.id === athleteId)!;
-    if (athlete.teamId !== slot.teamId) {
+    if (!isOpenTeamSlot(slot.teamId) && athlete.teamId !== slot.teamId) {
       const team = teamsById.get(slot.teamId);
       throw new Error(`${slot.label}: ${athlete.name}は${team?.name ?? slot.teamId}の選手ではありません`);
     }
@@ -189,7 +213,9 @@ export function applyEventSlotAthleteAssignments(
   const previousEventEntries = state.entries.filter((entry) => entry.eventId === eventId);
   const previousBySlot = new Map(previousEventEntries.map((entry) => [`${entry.heatId}:${entry.laneOrOrder}`, entry]));
   const previousByAthlete = new Map(previousEventEntries.map((entry) => [entry.athleteId, entry]));
-  const entries = state.entries.filter((entry) => entry.eventId !== eventId);
+  const managedSlots = new Set(slots.map((slot) => `${slot.heatId}:${slot.laneOrOrder}`));
+  const entries = state.entries.filter((entry) =>
+    entry.eventId !== eventId || !managedSlots.has(`${entry.heatId}:${entry.laneOrOrder}`));
   const keptEntryIds = new Set(entries.map((entry) => entry.id));
 
   for (const slot of slots) {

@@ -9,6 +9,7 @@ import {
   eventRegistrationSlots,
   eventIdsForAthlete,
   eventSlotAssignmentsForEvent,
+  OPEN_TEAM_SLOT_ID,
 } from "../lib/registration.ts";
 import { initialState } from "../lib/domain.ts";
 
@@ -145,10 +146,26 @@ test("1000mは1組決勝のまま各チーム3枠を用意する", () => {
   assert.deepEqual(slots.map((slot) => slot.teamId), ["A", "A", "A", "B", "B", "B", "C", "C", "C"]);
 });
 
-test("フィールド・1000m・リレー以外のトラック種目は6組ずつ用意する", () => {
-  for (const eventId of ["80m", "250m", "500m", "hurdle"]) {
+test("110mハードルは男子9枠・女子6枠の2組を用意し、全選手を選択できる", () => {
+  const slots = eventRegistrationSlots(initialState, "hurdle");
+  const maleSlots = slots.filter((slot) => slot.heatId === "hurdle-heat-1");
+  const femaleSlots = slots.filter((slot) => slot.heatId === "hurdle-heat-2");
+  const aSlot = maleSlots[0];
+  const bAthlete = initialState.athletes.find((athlete) => athlete.teamId === "B")!;
+  const next = applyEventSlotAthleteAssignments(initialState, "hurdle", { [aSlot.id]: bAthlete.id });
+
+  assert.equal(slots.length, 15);
+  assert.equal(maleSlots.length, 9);
+  assert.equal(femaleSlots.length, 6);
+  assert.deepEqual([...new Set(slots.map((slot) => slot.teamId))], [OPEN_TEAM_SLOT_ID]);
+  assert.ok(next.entries.some((entry) => entry.eventId === "hurdle" && entry.athleteId === bAthlete.id));
+});
+
+test("フィールド・1000m・リレー・110mハードル以外のトラック種目は6組ずつ用意する", () => {
+  for (const eventId of ["80m", "250m", "500m"]) {
     assert.equal(initialState.heats.filter((heat) => heat.eventId === eventId).length, 6);
   }
+  assert.equal(initialState.heats.filter((heat) => heat.eventId === "hurdle").length, 2);
   assert.equal(initialState.heats.filter((heat) => heat.eventId === "1000m").length, 1);
   assert.equal(initialState.heats.filter((heat) => heat.eventId === "relay").length, 1);
 });

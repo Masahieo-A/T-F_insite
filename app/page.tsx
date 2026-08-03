@@ -30,6 +30,7 @@ import {
   eventRegistrationSlots,
   eventIdsForAthlete,
   eventSlotAssignmentsForEvent,
+  OPEN_TEAM_SLOT_ID,
 } from "@/lib/registration";
 import { isStandingsLocked } from "@/lib/standingsVisibility";
 
@@ -80,8 +81,8 @@ function isMeetingState(value: unknown): value is MeetingState {
 }
 
 function withRequiredHeats(state: MeetingState) {
-  const requiredCounts: Record<string, number> = { "80m": 6, "250m": 6, "500m": 6, hurdle: 6 };
-  const heats = [...state.heats];
+  const requiredCounts: Record<string, number> = { "80m": 6, "250m": 6, "500m": 6, hurdle: 2 };
+  const heats = state.heats.filter((heat) => heat.eventId !== "hurdle" || heat.number <= 2);
   for (const [eventId, count] of Object.entries(requiredCounts)) {
     for (let number = 1; number <= count; number += 1) {
       if (heats.some((heat) => heat.eventId === eventId && heat.number === number)) continue;
@@ -108,6 +109,16 @@ function withRequiredHeats(state: MeetingState) {
     || heats.some((heat, index) => heat.id !== state.heats[index]?.id);
   if (!changedHeats && !changedEvents) return state;
   return { ...state, events, heats };
+}
+
+function heatLabel(event: Event, heat: { number: number }) {
+  if (event.id === "hurdle" && heat.number === 1) return "男子";
+  if (event.id === "hurdle" && heat.number === 2) return "女子";
+  return `${heat.number}組`;
+}
+
+function heatNumberFromId(heatId: string) {
+  return Number(heatId.match(/-heat-(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
 }
 
 async function openDb() {
@@ -248,14 +259,18 @@ export default function Home() {
   }, []);
 
   const selectedEvent = state.events.find((event) => event.id === selectedEventId) ?? state.events[0];
-  const selectedHeats = state.heats.filter((heat) => heat.eventId === selectedEvent.id);
+  const selectedHeats = state.heats.filter((heat) =>
+    heat.eventId === selectedEvent.id
+    && (selectedEvent.id !== "hurdle" || heat.number <= 2));
   const selectedHeat = selectedHeats.find((heat) => heat.id === selectedHeatId) ?? selectedHeats[0];
   const inputSlots = eventRegistrationSlots(state, selectedEvent.id)
     .filter((slot) => slot.heatId === selectedHeat?.id);
   const savedInputAthletes = eventSlotAssignmentsForEvent(state, selectedEvent.id);
   const isFieldInput = selectedEvent.kind === "field";
   const isRelayInput = selectedEvent.id === "relay";
-  const eventEntries = state.entries.filter((entry) => entry.eventId === selectedEvent.id);
+  const eventEntries = state.entries.filter((entry) =>
+    entry.eventId === selectedEvent.id
+    && (selectedEvent.id !== "hurdle" || heatNumberFromId(entry.heatId) <= 2));
   const inputChangeCount = inputSlots.filter((slot) =>
     Boolean(inputCodes[slot.id]
       || inputDrafts[slot.id]
@@ -1141,7 +1156,7 @@ export default function Home() {
                       <td>{event.startTime}</td>
                       <td className="event">{fullEventName(event)}</td>
                       <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{event.round}</a></td>
-                      <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{heat.number}</a></td>
+                      <td><a href="#" onClick={(mouseEvent) => { mouseEvent.preventDefault(); openEvent(event.id); }}>{heatLabel(event, heat)}</a></td>
                     </tr>
                   );
                 })}
@@ -1178,7 +1193,7 @@ export default function Home() {
             const rows = getEntryRows(state, selectedEvent, entries, resultOrder);
             return (
               <div key={heat.id} className="heat-block">
-                <div className="heat-title">{heat.number}組 {selectedEvent.status} 招集完了時刻 {heat.callCompleteAt}</div>
+                <div className="heat-title">{heatLabel(selectedEvent, heat)} {selectedEvent.status} 招集完了時刻 {heat.callCompleteAt}</div>
                 <div className="tablewrap">
                   <table className="grid result-grid">
                     <thead><tr><th>レーン</th><th>No</th><th>競技者名</th><th>所属<br />所属地</th><th>記録</th></tr></thead>
@@ -1277,7 +1292,7 @@ export default function Home() {
                 setInputCodes({});
                 setReviewing(false);
               }}>
-                {selectedHeats.map((heat) => <option key={heat.id} value={heat.id}>{heat.number}組</option>)}
+                {selectedHeats.map((heat) => <option key={heat.id} value={heat.id}>{heatLabel(selectedEvent, heat)}</option>)}
               </select>
             </div>
             <div className="storage-note input-guide">
@@ -1285,10 +1300,12 @@ export default function Home() {
                 ? "各チーム5人を選び、1人3回の試技を入力します。最高記録は自動計算されます。"
                 : isRelayInput
                   ? "全員リレーは各チームの記録だけを入力します。選手の選択は必要ありません。"
+                  : selectedEvent.id === "hurdle"
+                    ? "男子は9名、女子は6名を選びます。選手プルダウンは全員から選択できます。得点はタイムレース順位で自動計算します。"
                   : "各組でA・B・Cチームから1名ずつ選び、その場で対戦する3人の記録を入力します。"}
             </div>
           </div>
-          <div className="heat-title">{selectedEvent.name} {selectedHeat.number}組　{isRelayInput ? "記録入力" : "選手・記録入力"}</div>
+          <div className="heat-title">{selectedEvent.name} {selectedHeat ? heatLabel(selectedEvent, selectedHeat) : ""}　{isRelayInput ? "記録入力" : "選手・記録入力"}</div>
           <div className="tablewrap">
             <table className={`grid input-grid ${isFieldInput ? "field-input-grid" : isRelayInput ? "relay-input-grid" : "track-input-grid"}`}>
               <thead>{isFieldInput
@@ -1298,9 +1315,10 @@ export default function Home() {
                   : <tr><th>チーム</th><th>選手</th><th>記録</th><th>状態</th></tr>}
               </thead>
               <tbody>{inputSlots.map((slot) => {
-                const team = state.teams.find((candidate) => candidate.id === slot.teamId)!;
+                const team = state.teams.find((candidate) => candidate.id === slot.teamId);
                 const athleteId = inputAthleteId(slot.id);
                 const athlete = state.athletes.find((candidate) => candidate.id === athleteId);
+                const slotLabel = team?.name ?? slot.label;
                 const existingEntry = inputEntry(slot.id);
                 const existing = existingEntry ? getResult(state, existingEntry.id) : undefined;
                 const usedByOtherSlots = new Set(eventRegistrationSlots(state, selectedEvent.id)
@@ -1308,7 +1326,7 @@ export default function Home() {
                   .map((candidate) => inputAthletes[candidate.id] ?? savedInputAthletes[candidate.id] ?? "")
                   .filter(Boolean));
                 const selectableAthletes = state.athletes
-                  .filter((candidate) => candidate.teamId === slot.teamId
+                  .filter((candidate) => (slot.teamId === OPEN_TEAM_SLOT_ID || candidate.teamId === slot.teamId)
                     && (!usedByOtherSlots.has(candidate.id) || candidate.id === athleteId))
                   .sort((left, right) => left.bib - right.bib);
                 const attemptDrafts = fieldAttemptDrafts[slot.id] ?? ["", "", ""];
@@ -1318,7 +1336,7 @@ export default function Home() {
                 const currentBest = bestPerformance(currentAttempts, selectedEvent) ?? existing?.value ?? null;
                 return (
                   <tr key={slot.id} className={inputCodes[slot.id] ? "dns" : ""}>
-                    <td className="team-cell">{team.name}</td>
+                    <td className="team-cell">{team?.name ?? slot.label}</td>
                     {!isRelayInput && <td>
                       <select
                         className="input-athlete-select"
@@ -1339,7 +1357,7 @@ export default function Home() {
                       <td key={attemptIndex}>
                         <input
                           className="record-field attempt-field"
-                          aria-label={`${athlete?.name ?? team.name}の${attemptIndex + 1}回目`}
+                          aria-label={`${athlete?.name ?? slotLabel}の${attemptIndex + 1}回目`}
                           inputMode="decimal"
                           pattern="[0-9.]*"
                           disabled={Boolean(inputCodes[slot.id])}
@@ -1354,7 +1372,7 @@ export default function Home() {
                       <td>
                         <input
                           className="record-field"
-                          aria-label={`${isRelayInput ? team.name : athlete?.name ?? team.name}の記録`}
+                          aria-label={`${isRelayInput ? slotLabel : athlete?.name ?? slotLabel}の記録`}
                           inputMode="decimal"
                           pattern="[0-9.:]*"
                           disabled={Boolean(inputCodes[slot.id])}
@@ -1393,7 +1411,7 @@ export default function Home() {
           </div>
           {reviewing && (
             <div className="review-section">
-              <div className="heat-title">入力内容確認　{selectedHeat.number}組</div>
+              <div className="heat-title">入力内容確認　{selectedHeat ? heatLabel(selectedEvent, selectedHeat) : ""}</div>
               <div className="tablewrap">
                 <table className={`grid review-grid ${isRelayInput ? "relay-review-grid" : ""}`}>
                   <thead>{isRelayInput
@@ -1420,8 +1438,8 @@ export default function Home() {
                           || (existing?.status === "OK" ? formatPerformance(existing.value, selectedEvent) : existing?.status))
                       || "未入力";
                     const changed = Boolean(inputCodes[slot.id] || inputDrafts[slot.id] || attemptRaws.some(Boolean));
-                    const team = state.teams.find((candidate) => candidate.id === slot.teamId)!;
-                    return <tr key={slot.id}><td>{team.name}</td>{!isRelayInput && <td>{athlete.name}</td>}<td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
+                    const team = state.teams.find((candidate) => candidate.id === slot.teamId);
+                    return <tr key={slot.id}><td>{team?.name ?? slot.label}</td>{!isRelayInput && <td>{athlete.name}</td>}<td>{value}<span className="review-source">{changed ? "今回入力" : "保存済み"}</span></td></tr>;
                   })}</tbody>
                 </table>
               </div>

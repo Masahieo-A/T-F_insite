@@ -29,8 +29,8 @@ function stateWithResult(eventId: string, heatNumber: number): MeetingState {
   };
 }
 
-test("110mハードル3組目の保存結果をトリガーに総合順位をロックする", () => {
+test("110mハードル女子組の保存結果をトリガーに総合順位をロックする", () => {
   assert.equal(isStandingsLocked(initialState), false);
-  assert.equal(isStandingsLocked(stateWithResult("hurdle", 2)), false);
-  assert.equal(isStandingsLocked(stateWithResult("hurdle", 3)), true);
+  assert.equal(isStandingsLocked(stateWithResult("hurdle", 1)), false);
+  assert.equal(isStandingsLocked(stateWithResult("hurdle", 2)), true);
 });

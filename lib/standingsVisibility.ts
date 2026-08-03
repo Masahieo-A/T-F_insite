@@ -1,7 +1,7 @@
 import type { MeetingState } from "./domain.ts";
 
 export const STANDINGS_LOCK_EVENT_ID = "hurdle";
-export const STANDINGS_LOCK_HEAT_NUMBER = 3;
+export const STANDINGS_LOCK_HEAT_NUMBER = 2;
 
 export function isStandingsLocked(state: MeetingState) {
   const triggerHeat = state.heats.find((heat) =>

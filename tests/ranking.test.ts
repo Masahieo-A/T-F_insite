@@ -15,6 +15,7 @@ import {
 
 const sprint = events.find((event) => event.id === "80m")!;
 const longJump = events.find((event) => event.id === "long")!;
+const hurdle = events.find((event) => event.id === "hurdle")!;
 const entries: Entry[] = athletes.slice(0, 7).map((athlete, index) => ({
   id: `test-entry-${index}`,
   eventId: sprint.id,
@@ -188,6 +189,41 @@ test("複数組のトラック種目は組ごとに6・4・2点を付ける", ()
     transactions.filter((transaction) => transaction.reason === "event-rank").map((transaction) => transaction.note),
     ["1組1位 冨田 歩佑", "1組2位 今井 賢冴", "1組3位 梅田 歩武", "2組1位 山本 俊太朗", "2組2位 中島 優太", "2組3位 西脇 唯央"],
   );
+});
+
+test("110mハードルは男子9名・女子6名のタイムレース帯別に得点を付ける", () => {
+  const hurdleAthletes = athletes.slice(0, 15).map((athlete, index) => ({
+    ...athlete,
+    id: `hurdle-athlete-${index}`,
+    teamId: teams[index % 3].id,
+  }));
+  const hurdleEntries: Entry[] = hurdleAthletes.map((athlete, index) => ({
+    id: `hurdle-entry-${index}`,
+    eventId: hurdle.id,
+    heatId: index < 9 ? "hurdle-heat-1" : "hurdle-heat-2",
+    athleteId: athlete.id,
+    laneOrOrder: index < 9 ? index + 1 : index - 8,
+    scoringEligible: true,
+  }));
+  const hurdleResults: Result[] = hurdleEntries.map((entry, index) => ({
+    id: `hurdle-result-${index}`,
+    entryId: entry.id,
+    value: index < 9 ? 15 + index : 20 + index - 9,
+    displayValue: "",
+    status: "OK",
+    provisional: true,
+    isPersonalBest: false,
+  }));
+  const scores = calculateAthleteEventScores(
+    hurdle,
+    rankResults(hurdleResults, hurdleEntries, hurdleAthletes, hurdle),
+    scoreRules[0],
+  );
+
+  assert.deepEqual(scores.slice(0, 9).map((score) => score.basePoints), [6, 6, 6, 4, 4, 4, 2, 2, 2]);
+  assert.deepEqual(scores.slice(9).map((score) => score.basePoints), [6, 6, 4, 4, 2, 2]);
+  assert.deepEqual(scores.slice(0, 2).map((score) => score.heatLabel), ["男子", "男子"]);
+  assert.deepEqual(scores.slice(9, 11).map((score) => score.heatLabel), ["女子", "女子"]);
 });
 
 test("同着は該当順位点を平均し、無効記録は0点にする", () => {
