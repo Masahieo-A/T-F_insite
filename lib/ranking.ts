@@ -19,6 +19,8 @@ export type RankedResult = {
 export type AthleteEventScore = {
   eventId: string;
   entryId: string;
+  heatId: string;
+  heatLabel: string;
   athleteId: string;
   athleteName: string;
   teamId: string;
@@ -166,25 +168,60 @@ function sharedPlacePoints(rank: number, tiedCount: number, points: number[]) {
   return Math.round((total / tiedCount) * 10) / 10;
 }
 
+function heatNumberLabel(entry: Entry) {
+  const heatNumber = entry.heatId.match(/-heat-(\d+)$/)?.[1];
+  return heatNumber ? `${heatNumber}組` : "組";
+}
+
+function heatSortValue(entry: Entry) {
+  return Number(entry.heatId.match(/-heat-(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+}
+
+function rankScoringHeat(
+  items: RankedResult[],
+  event: Event,
+): RankedResult[] {
+  const valid = items
+    .filter((item) => item.result.status === "OK" && item.result.value !== null)
+    .sort((a, b) => comparePerformance(a.result.value!, b.result.value!, event));
+
+  let previousValue: number | null = null;
+  let currentRank = 0;
+  const rankedValid = valid.map((item, index) => {
+    if (previousValue === null || !isSamePerformance(previousValue, item.result.value!)) currentRank = index + 1;
+    previousValue = item.result.value;
+    return { ...item, rank: currentRank };
+  });
+
+  return [
+    ...rankedValid,
+    ...items
+      .filter((item) => item.result.status !== "OK" || item.result.value === null)
+      .map((item) => ({ ...item, rank: null })),
+  ];
+}
+
 export function calculateAthleteEventScores(
   event: Event,
   ranked: RankedResult[],
   rule: ScoreRule,
 ): AthleteEventScore[] {
   const eligible = ranked.filter((item) => item.entry.scoringEligible);
-  let previousValue: number | null = null;
-  let currentRank = 0;
-  const scoringRanked = eligible.map((item, index) => {
-    if (item.rank === null) return { ...item, rank: null };
-    if (previousValue === null || !isSamePerformance(previousValue, item.result.value!)) {
-      currentRank = index + 1;
-    }
-    previousValue = item.result.value;
-    return { ...item, rank: currentRank };
-  });
+  const scoringRanked = [...new Set(eligible.map((item) => item.entry.heatId))]
+    .sort((left, right) => {
+      const leftNumber = Number(left.match(/-heat-(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+      const rightNumber = Number(right.match(/-heat-(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+      return leftNumber - rightNumber || left.localeCompare(right);
+    })
+    .flatMap((heatId) => rankScoringHeat(
+      eligible.filter((item) => item.entry.heatId === heatId),
+      event,
+    ));
   const rows: AthleteEventScore[] = eligible.map((item) => ({
     eventId: event.id,
     entryId: item.entry.id,
+    heatId: item.entry.heatId,
+    heatLabel: heatNumberLabel(item.entry),
     athleteId: item.athlete.id,
     athleteName: item.athlete.name,
     teamId: item.athlete.teamId,
@@ -198,7 +235,8 @@ export function calculateAthleteEventScores(
   const valid = scoringRanked.filter((item) => item.rank !== null);
   const points = event.id === "relay" ? [18, 12, 6] : rule.eventPoints;
   for (const item of valid) {
-    const tiedCount = valid.filter((candidate) => candidate.rank === item.rank).length;
+    const tiedCount = valid.filter((candidate) =>
+      candidate.entry.heatId === item.entry.heatId && candidate.rank === item.rank).length;
     const row = rows.find((candidate) => candidate.entryId === item.entry.id)!;
     row.rank = item.rank;
     row.basePoints = sharedPlacePoints(item.rank!, tiedCount, points);
@@ -207,7 +245,12 @@ export function calculateAthleteEventScores(
   rows.forEach((row) => {
     row.totalPoints = row.basePoints;
   });
-  return rows;
+  return rows.sort((left, right) => {
+    const leftItem = eligible.find((item) => item.entry.id === left.entryId)!;
+    const rightItem = eligible.find((item) => item.entry.id === right.entryId)!;
+    return heatSortValue(leftItem.entry) - heatSortValue(rightItem.entry)
+      || leftItem.entry.laneOrOrder - rightItem.entry.laneOrOrder;
+  });
 }
 
 export function calculateEventScoreTransactions(
@@ -220,7 +263,7 @@ export function calculateEventScoreTransactions(
   const scores = calculateAthleteEventScores(event, ranked, rule)
     .filter((score) => teamIds.has(score.teamId));
   return scores.flatMap((score): ScoreTransaction[] => {
-    const rankLabel = event.id === "relay" ? "リレー" : "全体";
+    const rankLabel = event.id === "relay" ? "リレー" : score.heatLabel;
     const base = score.basePoints > 0 ? [{
       id: `${event.id}-${score.entryId}-event`,
       eventId: event.id,
@@ -269,7 +312,7 @@ export function calculateOverallStandings(
       return ownTotal > 0 && ownTotal === Math.max(...teamTotals);
     }).length;
     const individualWins = own.filter((transaction) =>
-      transaction.reason === "event-rank" && /全体1位/.test(transaction.note)).length;
+      transaction.reason === "event-rank" && /(組|全体|リレー)1位/.test(transaction.note)).length;
     const relayNote = own.find((transaction) =>
       transaction.eventId === "relay" && transaction.reason === "event-rank")?.note ?? "";
     const relayRank = Number(relayNote.match(/リレー(\d+)位/)?.[1] ?? 99);

@@ -1235,7 +1235,7 @@ export default function Home() {
                     <td className="event">{event.name}</td>
                     <td className="event">{score.athleteName}</td>
                     <td>{team.name}</td>
-                    <td>{score.rank === null ? score.status : `${score.rank}位`}</td>
+                    <td>{score.rank === null ? score.status : `${event.id === "relay" ? "リレー" : score.heatLabel}${score.rank}位`}</td>
                     <td className="scorecol">{score.totalPoints}</td>
                   </tr>;
                 })}

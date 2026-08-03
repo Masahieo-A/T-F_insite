@@ -144,6 +144,52 @@ test("実力帯を使わず全体順位から6・4・2点を付ける", () => {
   assert.equal(transactions.some((transaction) => transaction.reason === "pb-bonus"), false);
 });
 
+test("複数組のトラック種目は組ごとに6・4・2点を付ける", () => {
+  const heatAthletes = athletes.slice(0, 6).map((athlete, index) => ({
+    ...athlete,
+    id: `heat-athlete-${index}`,
+    teamId: teams[index % 3].id,
+  }));
+  const heatEntries: Entry[] = heatAthletes.map((athlete, index) => ({
+    id: `heat-entry-${index}`,
+    eventId: sprint.id,
+    heatId: index < 3 ? "80m-heat-1" : "80m-heat-2",
+    athleteId: athlete.id,
+    laneOrOrder: (index % 3) + 1,
+    scoringEligible: true,
+  }));
+  const heatResults: Result[] = heatEntries.map((entry, index) => ({
+    id: `heat-result-${index}`,
+    entryId: entry.id,
+    value: [10.0, 10.2, 10.4, 9.8, 11.0, 11.2][index],
+    displayValue: "",
+    status: "OK",
+    provisional: true,
+    isPersonalBest: false,
+  }));
+  const scores = calculateAthleteEventScores(
+    sprint,
+    rankResults(heatResults, heatEntries, heatAthletes, sprint),
+    scoreRules[0],
+  );
+  const byEntry = Object.fromEntries(scores.map((score) => [score.entryId, score]));
+  const transactions = calculateEventScoreTransactions(
+    sprint,
+    rankResults(heatResults, heatEntries, heatAthletes, sprint),
+    teams,
+    scoreRules[0],
+  );
+
+  assert.equal(byEntry["heat-entry-0"].rank, 1);
+  assert.equal(byEntry["heat-entry-0"].basePoints, 6);
+  assert.equal(byEntry["heat-entry-3"].rank, 1);
+  assert.equal(byEntry["heat-entry-3"].basePoints, 6);
+  assert.deepEqual(
+    transactions.filter((transaction) => transaction.reason === "event-rank").map((transaction) => transaction.note),
+    ["1組1位 冨田 歩佑", "1組2位 今井 賢冴", "1組3位 梅田 歩武", "2組1位 山本 俊太朗", "2組2位 中島 優太", "2組3位 西脇 唯央"],
+  );
+});
+
 test("同着は該当順位点を平均し、無効記録は0点にする", () => {
   const tieAthletes = athletes.slice(0, 4).map((athlete, index) => ({
     ...athlete,
