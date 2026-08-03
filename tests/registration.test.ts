@@ -39,6 +39,28 @@ test("同じ参加種目の重複選択は保存しない", () => {
   );
 });
 
+test("選手の出場種目数に上限を設けない", () => {
+  const athlete = initialState.athletes[0];
+  const desired = ["80m", "250m", "long", "500m", "hurdle"];
+  const next = applyAthleteEventAssignments(initialState, { [athlete.id]: desired });
+
+  assert.deepEqual(eventIdsForAthlete(next, athlete.id), desired);
+});
+
+test("記録入力時も4種目目以降の選手登録を保存できる", () => {
+  const athlete = initialState.athletes[0];
+  const firstThree = applyAthleteEventAssignments(initialState, {
+    [athlete.id]: ["80m", "250m", "long"],
+  });
+  const fourthSlot = eventRegistrationSlots(firstThree, "500m")
+    .find((slot) => slot.teamId === athlete.teamId)!;
+  const next = applyEventSlotAthleteAssignments(firstThree, "500m", {
+    [fourthSlot.id]: athlete.id,
+  });
+
+  assert.deepEqual(eventIdsForAthlete(next, athlete.id), ["80m", "250m", "long", "500m"]);
+});
+
 test("6組の各組にA・B・Cチーム1名ずつの入力枠を用意する", () => {
   const slots = eventRegistrationSlots(initialState, "80m");
   const firstHeatSlots = slots.filter((slot) => slot.heatId === "80m-heat-1");

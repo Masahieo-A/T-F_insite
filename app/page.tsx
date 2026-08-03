@@ -882,7 +882,7 @@ export default function Home() {
 
   const updateAssignment = (athleteId: string, slot: number, eventId: string) => {
     const current = [...assignmentFor(athleteId)];
-    while (current.length < 3) current.push("");
+    while (current.length <= slot) current.push("");
     current[slot] = eventId;
     setAssignmentDrafts((drafts) => ({ ...drafts, [athleteId]: current }));
   };
@@ -1515,10 +1515,10 @@ export default function Home() {
           </>}
 
           {registrationMode === "assignments" && <>
-            <div className="admin-note">競技者ごとに最大3種目を選択します。プルダウンは「種目設定」の登録内容を参照します。</div>
+            <div className="admin-note">競技者ごとに出場種目を選択します。プルダウンは「種目設定」の登録内容を参照します。同じ種目の重複登録はできません。</div>
             <div className="tablewrap assignment-wrap">
               <table className="grid assignment-grid">
-                <thead><tr><th>ナンバー</th><th>競技者名</th><th>性別</th><th>参加競技1</th><th>参加競技2</th><th>参加競技3</th></tr></thead>
+                <thead><tr><th>ナンバー</th><th>競技者名</th><th>性別</th>{state.events.filter((event) => event.id !== "relay").map((_, index) => <th key={index}>参加競技{index + 1}</th>)}</tr></thead>
                 <tbody>{state.athletes.map((athlete) => {
                   const selected = assignmentFor(athlete.id);
                   return (
@@ -1526,7 +1526,7 @@ export default function Home() {
                       <td>{athlete.bib}</td>
                       <td className="event"><div className="kana">{athlete.kana}</div>{athlete.name}</td>
                       <td>{athlete.sex}</td>
-                      {[0, 1, 2].map((slot) => (
+                      {state.events.filter((event) => event.id !== "relay").map((_, slot) => (
                         <td key={slot}>
                           <select className="assignment-select" aria-label={`${athlete.name}の参加競技${slot + 1}`} value={selected[slot] ?? ""} onChange={(event) => updateAssignment(athlete.id, slot, event.target.value)}>
                             <option value="">未選択</option>

@@ -75,8 +75,7 @@ export function applyAthleteCsv(state: MeetingState, text: string) {
 export function eventIdsForAthlete(state: MeetingState, athleteId: string) {
   return state.events
     .filter((event) => state.entries.some((entry) => entry.athleteId === athleteId && entry.eventId === event.id))
-    .map((event) => event.id)
-    .slice(0, 3);
+    .map((event) => event.id);
 }
 
 export type EventRegistrationSlot = {
@@ -193,17 +192,6 @@ export function applyEventSlotAthleteAssignments(
   const entries = state.entries.filter((entry) => entry.eventId !== eventId);
   const keptEntryIds = new Set(entries.map((entry) => entry.id));
 
-  for (const athleteId of selected) {
-    const registeredEventCount = new Set([
-      ...entries.filter((entry) => entry.athleteId === athleteId).map((entry) => entry.eventId),
-      eventId,
-    ]).size;
-    if (registeredEventCount > 3) {
-      const athlete = state.athletes.find((candidate) => candidate.id === athleteId)!;
-      throw new Error(`${athlete.name}: 出場種目は最大3つまでです`);
-    }
-  }
-
   for (const slot of slots) {
     const athleteId = assignments[slot.id];
     if (!athleteId) continue;
@@ -252,7 +240,7 @@ export function applyAthleteEventAssignments(
   for (const athlete of state.athletes) {
     if (!managedAthletes.has(athlete.id)) continue;
     const desired = assignments[athlete.id].filter(Boolean);
-    if (desired.length > 3 || new Set(desired).size !== desired.length) {
+    if (new Set(desired).size !== desired.length) {
       throw new Error(`${athlete.name}: 同じ種目を重複して選択できません`);
     }
     if (desired.some((eventId) => !eventIds.has(eventId))) {
